@@ -1,0 +1,452 @@
+# OCR Server Docker 部署指南
+
+## 1. 构建 Docker 镜像
+
+### 1.1 本地构建
+
+```bash
+# 进入项目目录
+cd /path/to/ocr-server
+
+# 构建镜像 (版本号建议使用时间戳或 git hash)
+docker build -t ocr-server:latest .
+
+# 或带版本号构建
+docker build -t ocr-server:v2.0.0 .
+```
+
+### 1.2 多架构构建 (可选，用于 ARM 服务器)
+
+```bash
+# 使用 buildx 构建多架构镜像
+docker buildx create --use
+docker buildx build --platform linux/amd64,linux/arm64 -t ocr-server:latest --load .
+```
+
+---
+
+## 2. 上传镜像到私有仓库 (可选)
+
+如果你使用私有 Docker 仓库，按以下步骤操作：
+
+```bash
+# 1. 登录仓库
+docker login your-registry.example.com
+
+# 2. 打标签
+docker tag ocr-server:latest your-registry.example.com/ocr-server:latest
+docker tag ocr-server:latest your-registry.example.com/ocr-server:v2.0.0
+
+# 3. 推送
+docker push your-registry.example.com/ocr-server:latest
+docker push your-registry.example.com/ocr-server:v2.0.0
+```
+
+---
+
+## 3. 服务器上拉取并启动
+
+### 3.1 准备配置文件
+
+在服务器上创建项目目录：
+
+```bash
+mkdir -p /data/ocr-server
+cd /data/ocr-server
+
+# 复制以下文件到服务器:
+# - docker-compose.yml
+# - .env.example → 重命名为 .env
+```
+
+### 3.2 编辑环境变量配置
+
+复制并编辑 `.env` 文件：
+
+```bash
+cp .env.example .env
+nano .env  # 或 vim .env
+```
+
+**必填配置项**：
+
+```env
+# ============================================
+#  必填配置
+# ============================================
+
+# LLM 端点配置
+OCR_LLM_URL=http://10.0.0.0:8320
+OCR_LLM_TOKEN=your-llm-token
+OCR_LLM_MODEL=GLM-AUTO
+
+# GitLab 配置
+GITLAB_URL=https://gitlab.your-company.com
+GITLAB_TOKEN=your-gitlab-project-access-token-here
+
+# Webhook 密钥 (在 GitLab 中配置时使用)
+WEBHOOK_SECRET=your-secret-token-here
+```
+
+**可选配置项** (保持默认即可)：
+
+```env
+# 性能调优
+MAX_CONCURRENT_REVIEWS=2
+OCR_CONCURRENCY=8
+OCR_TIMEOUT_MIN=10
+REQUEST_TIMEOUT_SEC=900
+MAX_QUEUED_TASKS=10
+
+# 卡点策略
+BLOCKING_SEVERITIES=critical,high
+
+# 存储路径
+STORAGE_PATH=/var/ocr/ocr.db
+REPO_CACHE_DIR=/var/ocr/repos
+WORK_DIR=/var/ocr/work
+```
+
+### 3.3 启动服务
+
+#### 方式 A：使用 docker-compose (推荐)
+
+```bash
+# 拉取镜像 (如果使用私有仓库)
+# docker pull your-registry.example.com/ocr-server:latest
+
+# 修改 docker-compose.yml 中的 image 字段 (如需要)
+# image: your-registry.example.com/ocr-server:latest
+
+# 启动服务
+docker-compose up -d
+
+# 查看日志
+docker-compose logs -f
+```
+
+#### 方式 B：纯 Docker 命令启动
+
+```bash
+# 1. 创建 volumes
+docker volume create ocr_repos
+docker volume create ocr_work
+
+# 2. 启动容器
+docker run -d \
+  --name ocr-server \
+  --restart unless-stopped \
+  -p 8000:8000 \
+  -v ocr_repos:/var/ocr/repos \
+  -v ocr_work:/var/ocr/work \
+  -v /etc/localtime:/etc/localtime:ro \
+  -v /etc/timezone:/etc/timezone:ro \
+  -e OCR_LLM_URL=http://10.0.0.0:8320 \
+  -e OCR_LLM_TOKEN=your-llm-token \
+  -e OCR_LLM_MODEL=GLM-AUTO \
+  -e GITLAB_URL=https://gitlab.your-company.com \
+  -e GITLAB_TOKEN=your-gitlab-token \
+  -e WEBHOOK_SECRET=your-webhook-secret \
+  --memory=8g \
+  --cpus=4 \
+  ocr-server:latest
+
+# 3. 查看日志
+docker logs -f ocr-server
+```
+
+---
+
+## 4. 验证部署
+
+### 4.1 健康检查
+
+```bash
+curl http://localhost:8000/health
+# 应返回: {"status":"ok","ocr_bin":"ocr","llm_url":"http://..."}
+```
+
+### 4.2 查看容器状态
+
+```bash
+docker-compose ps
+# 或
+docker ps | grep ocr-server
+```
+
+### 4.3 查看服务日志
+
+```bash
+docker-compose logs -f --tail=100
+```
+
+---
+
+## 5. GitLab Webhook 配置
+
+### 5.1 在 GitLab 项目中配置 Webhook
+
+1. 进入 GitLab 项目 → **Settings** → **Integrations**
+2. 填写以下配置：
+
+| 配置项 | 值 |
+|--------|-----|
+| **URL** | `http://your-server-ip:8000/gitlab/codeReview` |
+| **Secret token** | 与 `.env` 中的 `WEBHOOK_SECRET` 一致 |
+| **Trigger** | ☑️ **Merge request events** (只选这一项) |
+| **Enable SSL verification** | 根据你的服务器证书情况选择 |
+
+3. 点击 **Save changes**
+4. 点击 **Test** → **Merge request events** 测试连接
+
+### 5.2 验证 Webhook 工作流程
+
+1. 创建一个新的 MR
+2. GitLab 发送 webhook 到 OCR Server
+3. OCR Server 立即返回 200 (可在 GitLab Integrations 页面查看最近的 webhook 日志)
+4. OCR Server 后台异步执行审核
+5. 审核完成后，在 MR 的 **Discussions** 标签页中可以看到：
+   - 一开始显示 "⏳ 审核中，请稍候..."
+   - 几分钟后，该消息被编辑为审核结论，并被 resolve
+   - 如果有代码问题，会同时显示 inline 评论
+
+---
+
+## 6. 任务状态查询
+
+使用 task_id 查询审核状态：
+
+```bash
+# 格式: GET /status/{task_id}
+curl http://localhost:8000/status/your-task-id-here
+```
+
+响应示例：
+
+```json
+{
+  "task_id": "a1b2c3d4-...",
+  "project_id": "123",
+  "mr_iid": "42",
+  "status": "done",
+  "approve": true,
+  "summary": "✅ 审核通过...",
+  "error": null,
+  "gitlab_posted": true,
+  "created_at": "2024-01-01T...",
+  "started_at": "2024-01-01T...",
+  "finished_at": "2024-01-01T...",
+  "stats": {...}
+}
+```
+
+---
+
+## 7. 常用运维命令
+
+### 7.1 查看服务状态
+
+```bash
+docker-compose ps
+```
+
+### 7.2 查看日志
+
+```bash
+# 实时查看
+docker-compose logs -f
+
+# 查看最近 100 行
+docker-compose logs --tail=100
+
+# 只查看错误
+docker-compose logs | grep -i error
+```
+
+### 7.3 重启服务
+
+```bash
+docker-compose restart
+```
+
+### 7.4 停止服务
+
+```bash
+docker-compose down
+# 保留 volumes (推荐)
+```
+
+### 7.5 更新服务
+
+```bash
+# 1. 拉取新镜像 (如需要)
+docker pull your-registry.example.com/ocr-server:latest
+
+# 2. 重新启动
+docker-compose down
+docker-compose up -d
+```
+
+### 7.6 清理仓库缓存 (磁盘空间不足时)
+
+```bash
+# 进入容器清理
+docker exec ocr-server rm -rf /var/ocr/repos/*.git
+
+# 或删除 volume 重新创建
+docker-compose down
+docker volume rm ocr-server_ocr_repos
+docker-compose up -d
+```
+
+### 7.7 查看 SQLite 数据库内容 (调试用)
+
+```bash
+# 进入容器
+docker exec -it ocr-server bash
+
+# 安装 sqlite3 (容器内可能没有)
+apt-get update && apt-get install -y sqlite3
+
+# 查询数据
+sqlite3 /var/ocr/ocr.db
+sqlite> .tables
+sqlite> SELECT * FROM review_task;
+sqlite> .quit
+```
+
+---
+
+## 8. 故障排查
+
+### 8.1 服务无法启动
+
+```bash
+# 查看详细日志
+docker-compose logs ocr-server
+
+# 检查端口是否被占用
+netstat -tlnp | grep 8000
+```
+
+### 8.2 ocr CLI 二进制问题
+
+如果日志中显示 ocr 二进制损坏：
+
+```bash
+# 重启容器，entrypoint.sh 会自动重新安装
+docker-compose restart
+```
+
+### 8.3 GitLab 连接失败
+
+检查以下配置：
+
+- `GITLAB_URL` 是否正确 (不要有多余的斜杠)
+- `GITLAB_TOKEN` 是否有效 (需要有 api 权限)
+- 网络是否通：
+
+```bash
+docker exec ocr-server curl -f https://gitlab.your-company.com/api/v4/projects?per_page=1 \
+  -H "PRIVATE-TOKEN: your-token"
+```
+
+### 8.4 LLM 连接失败
+
+```bash
+# 进入容器测试 LLM 连接
+docker exec -it ocr-server ocr llm test
+```
+
+---
+
+## 9. 升级指南
+
+### 9.1 从 v1.x (同步模式) 升级到 v2.x (异步模式)
+
+1. 备份数据 (可选)：
+   ```bash
+   # 如果使用了 SQLite 存储，备份数据库文件
+   docker exec ocr-server cp /var/ocr/ocr.db /var/ocr/ocr.db.backup
+   ```
+
+2. 拉取新镜像并重启：
+   ```bash
+   docker-compose down
+   docker pull your-registry.example.com/ocr-server:v2.0.0
+   # 更新 docker-compose.yml 中的 image 字段
+   docker-compose up -d
+   ```
+
+3. 更新 GitLab Webhook 配置 (如需要)：
+   - 旧版 CI 模式可以继续使用 `/review` 端点
+   - 新增 `/gitlab/codeReview` 端点用于 GitLab 直接触发
+
+---
+
+## 10. 安全建议
+
+1. **不要将 `.env` 文件提交到 Git** - 它包含敏感信息
+2. **使用强密钥** - `WEBHOOK_SECRET` 和 `GITLAB_TOKEN` 应足够复杂
+3. **限制访问** - 使用防火墙或安全组限制 8000 端口的访问源
+4. **使用 HTTPS** - 生产环境建议在前面加 Nginx 或 Traefik 做 SSL 终止
+5. **定期更新** - 保持 Docker 镜像和依赖库更新
+
+---
+
+## 附录：完整 docker-compose.yml (参考)
+
+```yaml
+version: '3.8'
+
+services:
+  ocr-server:
+    image: ocr-server:latest
+    container_name: ocr-server
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ocr_repos:/var/ocr/repos
+      - ocr_work:/var/ocr/work
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    environment:
+      - OCR_SERVER_HOST=0.0.0.0
+      - OCR_SERVER_PORT=8000
+      - OCR_LLM_URL=http://10.0.0.0:8320
+      - OCR_LLM_TOKEN=your-llm-token
+      - OCR_LLM_MODEL=GLM-AUTO
+      - OCR_USE_ANTHROPIC=true
+      - OCR_NO_UPDATE=true
+      - MAX_CONCURRENT_REVIEWS=2
+      - OCR_CONCURRENCY=8
+      - OCR_TIMEOUT_MIN=10
+      - REQUEST_TIMEOUT_SEC=900
+      - GITLAB_URL=https://gitlab.your-company.com
+      - GITLAB_TOKEN=your-gitlab-token
+      - GITLAB_CLONE_USER=oauth2
+      - REPO_CACHE_DIR=/var/ocr/repos
+      - WORK_DIR=/var/ocr/work
+      - BLOCKING_SEVERITIES=critical,high
+      - WEBHOOK_SECRET=your-webhook-secret
+      - STORAGE_PATH=/var/ocr/ocr.db
+      - MAX_QUEUED_TASKS=10
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+volumes:
+  ocr_repos:
+  ocr_work:
+```

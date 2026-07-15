@@ -1,0 +1,62 @@
+# GitLab CI 模板:MR 触发,调用 OCR Server 审核,按 approve 决定 pipeline 成败。
+#
+# 用法:在项目 .gitlab-ci.yml 中 include 本文件,或在 CI/CD 变量里配 OCR_SERVER_URL。
+#
+# 需在 GitLab 项目 Settings -> CI/CD -> Variables 配置:
+#   OCR_SERVER_URL  - OCR Server 地址,如 http://10.x.x.x:8000
+#
+# 需在项目 Settings -> Merge Requests 开启:
+#   "Pipelines must succeed"  (pipeline 失败则阻止 merge,这是卡点的关键)
+
+stages:
+  - review
+
+ocr-review:
+  stage: review
+  interruptible: true
+  # 同一 MR 串行审核,避免重复触发叠加
+  resource_group: mr-review-$CI_MERGE_REQUEST_IID
+  only:
+    - merge_requests
+  # runner 无需装 ocr/node,只要有 curl + python3;轻量 image
+  image: alpine:3.20
+  before_script:
+    - apk add --no-cache curl python3 jq
+  variables:
+    GIT_STRATEGY: none   # 不在 runner clone 代码,Server 自己拉
+  script:
+    - |
+      echo "审核 MR !${CI_MERGE_REQUEST_IID}: ${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME} -> ${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
+      set +e
+      RESP=$(curl -sS -m 900 --fail-with-body \
+        -X POST "${OCR_SERVER_URL}/review" \
+        -H "Content-Type: application/json" \
+        -d "{
+          \"project_id\": \"${CI_PROJECT_ID}\",
+          \"project_url\": \"${CI_PROJECT_URL}\",
+          \"source_branch\": \"${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}\",
+          \"target_branch\": \"${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}\",
+          \"mr_iid\": \"${CI_MERGE_REQUEST_IID}\",
+          \"commit_sha\": \"${CI_COMMIT_SHA}\"
+        }")
+      CURL_RC=$?
+      set -e
+      echo "$RESP" | jq . 2>/dev/null || echo "$RESP"
+
+      if [ $CURL_RC -ne 0 ]; then
+        echo "❌ 调用 OCR Server 失败(网络/服务错误),详见上方输出"
+        # 服务不可用时不卡死 MR:这里选择 fail(严格)。若想放行可改为 exit 0
+        exit 1
+      fi
+
+      APPROVE=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('approve'))" 2>/dev/null)
+      SUMMARY=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('summary',''))" 2>/dev/null)
+      echo "OCR 结论: $SUMMARY"
+
+      if [ "$APPROVE" = "True" ]; then
+        echo "✅ 审核通过,详情见 MR 评论"
+        exit 0
+      else
+        echo "❌ 审核未通过,存在 critical/high 问题,详见 MR 评论"
+        exit 1
+      fi

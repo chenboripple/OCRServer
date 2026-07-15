@@ -1,0 +1,6 @@
+# OCR Server 依赖
+fastapi>=0.110
+uvicorn[standard]>=0.27
+httpx>=0.27          # 调 GitLab API 和飞书 API
+pydantic>=2.6        # FastAPI 请求体校验
+python-dotenv>=1.0   # 加载 .env(可选,便于本地调试)

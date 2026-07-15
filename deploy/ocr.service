@@ -1,0 +1,45 @@
+[Unit]
+Description=OCR Server (OpenCodeReview MR auto-review)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ocr
+Group=ocr
+WorkingDirectory=/opt/ocr-server
+
+# 环境变量(也可用 EnvironmentFile=/opt/ocr-server/.env)
+Environment=OCR_SERVER_HOST=0.0.0.0
+Environment=OCR_SERVER_PORT=8000
+Environment=OCR_BIN=ocr
+Environment=OCR_LLM_URL=https://your-llm-endpoint.example.com
+Environment=OCR_LLM_TOKEN=REPLACE_ME
+Environment=OCR_LLM_MODEL=GLM-AUTO
+Environment=OCR_USE_ANTHROPIC=true
+Environment=OCR_NO_UPDATE=true
+Environment=OCR_CONCURRENCY=8
+Environment=OCR_TIMEOUT_MIN=10
+Environment=REQUEST_TIMEOUT_SEC=900
+Environment=MAX_CONCURRENT_REVIEWS=2
+Environment=GITLAB_URL=https://gitlab.example.com
+Environment=GITLAB_TOKEN=REPLACE_ME
+Environment=REPO_CACHE_DIR=/var/ocr/repos
+Environment=WORK_DIR=/var/ocr/work
+Environment=BLOCKING_SEVERITIES=critical,high
+
+# 确保环境变量传给子进程(ocr)
+Environment=PYTHONUNBUFFERED=1
+
+ExecStart=/opt/ocr-server/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=5
+
+# 安全加固
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/ocr
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

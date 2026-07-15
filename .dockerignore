@@ -1,0 +1,65 @@
+# ============================================
+# Docker 构建排除文件
+# 不需要复制到镜像中的文件和目录
+# ============================================
+
+# --- Git 相关 ---
+.git
+.gitignore
+.gitattributes
+
+# --- Python 缓存 ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+.tox/
+
+# --- IDE 和编辑器 ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# --- 环境变量和配置 (不打包进镜像，运行时注入) ---
+.env
+.env.local
+.secrets
+secrets/
+config/
+*.local
+
+# --- 部署文档 ---
+deploy/README.md
+deploy/*.service
+
+# --- 测试 ---
+tests/
+test_*.py
+*_test.py
+
+# --- 其他 ---
+*.md
+CLAUDE.md
+TODO
+CHANGELOG
+LICENSE
+*.log
+*.tmp
+*.bak
+
+# --- 缓存目录 (运行时 volume 挂载，不在镜像中) ---
+repos/
+work/
+cache/

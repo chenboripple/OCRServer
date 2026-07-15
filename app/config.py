@@ -1,0 +1,99 @@
+"""
+OCR Server 配置。所有配置通过环境变量注入,不硬编码敏感信息。
+部署时用 .env 或 systemd Environment= 注入。
+"""
+import os
+from pathlib import Path
+
+
+def _env(key: str, default: str = "") -> str:
+    return os.environ.get(key, default)
+
+
+def _env_int(key: str, default: int) -> int:
+    try:
+        return int(os.environ.get(key, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_bool(key: str, default: bool = False) -> bool:
+    v = os.environ.get(key)
+    if v is None:
+        return default
+    return v.strip().lower() in ("1", "true", "yes", "on")
+
+
+# ── 服务监听 ────────────────────────────────────────────────
+HOST = _env("OCR_SERVER_HOST", "0.0.0.0")
+PORT = _env_int("OCR_SERVER_PORT", 8000)
+
+# ── OCR CLI ────────────────────────────────────────────────
+# ocr 可执行文件路径。Linux 上 npm 全局安装后通常在 /usr/bin/ocr 或 /usr/local/bin/ocr;
+# 若留空则在 PATH 中查找。Windows 本机调试可指向 ocr.cmd 或 exe。
+OCR_BIN = _env("OCR_BIN", "ocr")
+# ocr review 单文件并发
+OCR_CONCURRENCY = _env_int("OCR_CONCURRENCY", 8)
+# ocr review 任务超时(分钟)
+OCR_TIMEOUT_MIN = _env_int("OCR_TIMEOUT_MIN", 10)
+# 单个 MR 请求的总超时(秒),应 > OCR_TIMEOUT_MIN * 60
+REQUEST_TIMEOUT_SEC = _env_int("REQUEST_TIMEOUT_SEC", 900)
+# 同时处理的 MR 数(线程池大小)
+MAX_CONCURRENT_REVIEWS = _env_int("MAX_CONCURRENT_REVIEWS", 2)
+
+# ── LLM(ocr 配置) ─────────────────────────────────────────
+# 优先用环境变量驱动 ocr(ocr 兼容这些);也可用 ~/.opencodereview/config.json
+# LLM 端点与令牌无内置默认值,部署时必须显式配置(原内网默认值已移除)
+OCR_LLM_URL = _env("OCR_LLM_URL", "")
+OCR_LLM_TOKEN = _env("OCR_LLM_TOKEN", "")
+OCR_LLM_MODEL = _env("OCR_LLM_MODEL", "GLM-AUTO")
+# 内网端点是 anthropic 兼容协议,需开启
+OCR_USE_ANTHROPIC = _env_bool("OCR_USE_ANTHROPIC", True)
+# 关闭 ocr 后台自动更新,避免引入坏版本(本次 exe 截断的教训)
+OCR_NO_UPDATE = _env_bool("OCR_NO_UPDATE", True)
+
+# ── GitLab ─────────────────────────────────────────────────
+GITLAB_URL = _env("GITLAB_URL", "")              # 如 https://gitlab.example.com
+GITLAB_TOKEN = _env("GITLAB_TOKEN", "")          # Project/Group Access Token,api scope
+# clone 用的 URL 模板:在仓库 URL 里注入 token,避免每次输密码
+# 例:https://oauth2:{token}@gitlab.example.com/group/project.git
+GITLABClone_AUTH_USER = _env("GITLAB_CLONE_USER", "oauth2")
+
+# ── 仓库缓存 ───────────────────────────────────────────────
+REPO_CACHE_DIR = Path(_env("REPO_CACHE_DIR", "/var/ocr/repos"))
+WORK_DIR = Path(_env("WORK_DIR", "/var/ocr/work"))   # ocr 实际跑的工作树父目录
+GIT_COMMAND_TIMEOUT = _env_int("GIT_COMMAND_TIMEOUT", 300)  # git 命令超时(秒),大仓库需要更长时间
+
+# ── 卡点策略 ───────────────────────────────────────────────
+# 命中这些 severity 则 reject(卡 MR)
+BLOCKING_SEVERITIES = set(
+    s.strip() for s in _env("BLOCKING_SEVERITIES", "critical,high").split(",") if s.strip()
+)
+
+# ── Webhook ───────────────────────────────────────────────
+WEBHOOK_SECRET = _env("WEBHOOK_SECRET", "")
+STORAGE_PATH = Path(_env("STORAGE_PATH", "/var/ocr/ocr.db"))
+
+# ── Feishu(飞书电子表格集成) ─────────────────────────────────
+# 每次 review 前从飞书电子表格读取自定义审核规则,更新到 ocr 配置文件中
+# 表格格式:第一列任意(如序号),第二列为审核规则文本
+FEISHU_ENABLED = _env_bool("FEISHU_ENABLED", False)
+FEISHU_APP_ID = _env("FEISHU_APP_ID", "")
+FEISHU_APP_SECRET = _env("FEISHU_APP_SECRET", "")
+FEISHU_SPREADSHEET_TOKEN = _env("FEISHU_SPREADSHEET_TOKEN", "")  # 飞书电子表格 URL 中的 spreadsheet_token
+FEISHU_SHEET_RANGE = _env("FEISHU_SHEET_RANGE", "Sheet1!A:B")    # 读取范围,默认取 A、B 两列
+
+# ── ocr 配置文件路径 ───────────────────────────────────────
+# ocr 的 ~/.opencodereview/config.json,程序启动时/每次 review 前可写入自定义规则
+OCR_CONFIG_PATH = Path(
+    _env("OCR_CONFIG_PATH", str(Path.home() / ".opencodereview" / "config.json"))
+)
+
+# ── 审核触发策略 ────────────────────────────────────────────
+# 目标分支为这些分支时,始终触发 OCR 审核
+REQUIRED_REVIEW_BRANCHES = set(
+    s.strip() for s in _env("REQUIRED_REVIEW_BRANCHES", "master,release").split(",") if s.strip()
+)
+# 非必需分支时,仅当 MR 标题去空白转小写后的前缀等于此值时触发审核;空字符串表示禁用标题触发
+REVIEW_TITLE_TRIGGER = _env("REVIEW_TITLE_TRIGGER", "ocr")
+MAX_QUEUED_TASKS = _env_int("MAX_QUEUED_TASKS", 10)  # 队列满了返回 503 让 GitLab 重试

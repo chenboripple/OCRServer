@@ -1,0 +1,154 @@
+# ============================================
+# OCR Server Docker Compose 配置
+# OpenCodeReview GitLab MR 自动审核服务
+# ============================================
+version: '3.8'
+
+services:
+  ocr-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ocr-server:latest
+    container_name: ocr-server
+    restart: unless-stopped
+
+    # 端口映射: 宿主机:容器
+    ports:
+      - "8000:8000"
+
+    # ============================================
+    # Volume 挂载
+    # ============================================
+    volumes:
+      # 持久化 bare repo 缓存 (加速后续审核，避免每次重新 clone)
+      - ocr_repos:/var/ocr/repos
+      # 临时工作目录 (审核后清理，可丢失)
+      - ocr_work:/var/ocr/work
+      # 可选: 挂载时区文件，保持日志时间与宿主机一致
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+
+    # ============================================
+    # 环境变量配置
+    # 优先级: docker-compose environment > .env 文件 > Dockerfile ENV
+    # 敏感信息建议使用 .env 文件或 Docker Secrets，不要直接写在这里
+    # ============================================
+    environment:
+      # --- LLM 配置 (内网 Anthropic 兼容端点) ---
+      # *必填*: 请在 .env 文件中配置
+      - OCR_LLM_URL=${OCR_LLM_URL}
+      - OCR_LLM_TOKEN=${OCR_LLM_TOKEN}
+      - OCR_LLM_MODEL=${OCR_LLM_MODEL}
+      - OCR_USE_ANTHROPIC=${OCR_USE_ANTHROPIC}
+      - OCR_NO_UPDATE=true
+
+      # --- 性能调优 (默认值见 .env.example/config.py,.env 可覆盖) ---
+      - MAX_CONCURRENT_REVIEWS=${MAX_CONCURRENT_REVIEWS:-2}
+      - OCR_CONCURRENCY=${OCR_CONCURRENCY:-8}
+      - OCR_TIMEOUT_MIN=${OCR_TIMEOUT_MIN:-10}
+      - REQUEST_TIMEOUT_SEC=${REQUEST_TIMEOUT_SEC:-900}
+
+      # --- GitLab 配置 (回写评论用) ---
+      # *必填*: 请在 .env 文件中配置或取消注释并修改
+      - GITLAB_URL=${GITLAB_URL}
+      - GITLAB_TOKEN=${GITLAB_TOKEN}
+      - GITLAB_CLONE_USER=${GITLAB_CLONE_USER:-oauth2}
+
+      # 跳过 SSL 验证 (内网 GitLab 无合法证书)
+      - GIT_SSL_NO_VERIFY=1
+
+      # --- 卡点策略: 命中这些 severity 则 reject (阻止 merge) ---
+      - BLOCKING_SEVERITIES=${BLOCKING_SEVERITIES:-critical,high}
+
+      # --- 存储 / 并发背压 ---
+      - STORAGE_PATH=${STORAGE_PATH:-/var/ocr/ocr.db}
+      - MAX_QUEUED_TASKS=${MAX_QUEUED_TASKS:-10}
+      - GIT_COMMAND_TIMEOUT=${GIT_COMMAND_TIMEOUT:-300}
+
+      # --- Webhook 配置 (可选，用于 GitLab 直接触发) ---
+      # *必填* 如使用 webhook: 请在 .env 文件中配置
+      # - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+
+      # 注: OCR_SERVER_HOST/PORT、REPO_CACHE_DIR、WORK_DIR 由 Dockerfile ENV 提供默认值
+      # (与 volume 挂载/EXPOSE 绑定),此处不再重复;如需覆盖请在此添加 ${VAR} 引用。
+
+    # ============================================
+    # 资源限制 (代码审核资源密集，根据服务器配置调整)
+    # ============================================
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+
+    # ============================================
+    # 网络配置
+    # ============================================
+    # 如 GitLab/LLM 端点在宿主机本地网络，可使用 host 模式简化配置:
+    # network_mode: "host"
+    #
+    # 如需自定义 DNS (内网环境):
+    # dns:
+    #   - 10.0.0.1
+    #   - 8.8.8.8
+
+    # ============================================
+    # 日志配置
+    # ============================================
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+# ============================================
+# Volumes 定义
+# ============================================
+volumes:
+  # bare repo 缓存 (持久化，增长后可清理)
+  ocr_repos:
+    driver: local
+    # 可选: 指定宿主机目录
+    # driver_opts:
+    #   type: none
+    #   o: bind
+    #   device: /data/ocr/repos
+
+  # 临时工作目录 (审核后清理)
+  ocr_work:
+    driver: local
+    # 可选: 使用 tmpfs (内存文件系统，更快但容量有限)
+    # driver_opts:
+    #   type: tmpfs
+    #   device: tmpfs
+    #   o: "size=2G,uid=1000,gid=1000,mode=0755"
+
+# ============================================
+# 使用说明
+# ============================================
+# 1. 复制环境变量模板:
+#    cp .env.example .env
+#
+# 2. 编辑 .env，填入必填配置:
+#    - OCR_LLM_URL
+#    - OCR_LLM_TOKEN
+#    - GITLAB_URL
+#    - GITLAB_TOKEN
+#
+# 3. 启动服务:
+#    docker-compose up -d
+#
+# 4. 查看日志:
+#    docker-compose logs -f
+#
+# 5. 健康检查:
+#    curl http://localhost:8000/health
+#
+# 6. 清理缓存 (空间不足时):
+#    docker exec ocr-server rm -rf /var/ocr/repos/*.git
+#
+# ============================================
