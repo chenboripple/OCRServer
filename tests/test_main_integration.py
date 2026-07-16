@@ -7,12 +7,14 @@ import pytest
 
 @pytest.fixture
 def app_client(tmp_path, monkeypatch):
-    from app import config, main
+    from app import config, main, storage
+    import app.webhooks
 
     monkeypatch.setattr(config, "STORAGE_PATH", tmp_path / "it.db")
-    main.storage.init_db()
-    monkeypatch.setattr(main, "_submit_to_executor", lambda task_id: None)
-    monkeypatch.setattr(main, "_gitlab", lambda: None)
+    storage.init_db()
+    # 不真正跑审核;webhook 处理层用到的依赖置为 no-op / None
+    monkeypatch.setattr(app.webhooks, "submit_to_executor", lambda task_id: None)
+    monkeypatch.setattr(app.webhooks, "get_gitlab", lambda: None)
 
     from fastapi.testclient import TestClient
     with TestClient(main.app) as client:
