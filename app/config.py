@@ -103,4 +103,6 @@ REQUIRED_REVIEW_BRANCHES = set(
 )
 # 非必需分支时,仅当 MR 标题去空白转小写后的前缀等于此值时触发审核;空字符串表示禁用标题触发
 REVIEW_TITLE_TRIGGER = _env("REVIEW_TITLE_TRIGGER", "ocr")
-MAX_QUEUED_TASKS = _env_int("MAX_QUEUED_TASKS", 10)  # 队列满了返回 503 让 GitLab 重试
+# 队列无上限:任务总会被接受并排队(不再因队列满返回 503)。
+# 当排队(status=queued)任务数「超过」此值时,首次评论显示「已进入待审核队列」而非「审核中」。
+QUEUE_NOTICE_THRESHOLD = _env_int("QUEUE_NOTICE_THRESHOLD", 5)

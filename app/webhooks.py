@@ -71,13 +71,8 @@ async def handle_code_review(request: Request, background_tasks: BackgroundTasks
                 log.warning("跳过审核评论发送失败: %s", e)
         return JSONResponse(content={"status": "skipped", "reason": trigger_skip_reason})
 
-    # 7. 背压检查(落库前判断,避免创建不会被投递的孤儿任务)
+    # 7. 队列无上限:任务总会被接受并排队(不返回 503)。记录当前排队数用于选择提示文案。
     queued_count = storage.get_queued_count()
-    if queued_count >= config.MAX_QUEUED_TASKS:
-        return JSONResponse(
-            content={"status": "busy", "reason": f"Queue full ({queued_count}/{config.MAX_QUEUED_TASKS})"},
-            status_code=503,
-        )
 
     # 8. 落库任务(create_task 内部按 (project_id, mr_iid, commit_sha) 幂等去重)
     task_id, created = storage.create_task(
@@ -116,8 +111,13 @@ async def handle_code_review(request: Request, background_tasks: BackgroundTasks
     pending_discussion_id = None
     pending_note_id = None
     if gl:
+        # 排队较多(超过 QUEUE_NOTICE_THRESHOLD)时提示「已进入待审核队列」,否则「审核中」
+        if queued_count > config.QUEUE_NOTICE_THRESHOLD:
+            pending_msg = "⏳ 已进入待审核队列，请耐心等待..."
+        else:
+            pending_msg = "⏳ 审核中，请稍候..."
         try:
-            pending = gl.create_discussion(project_id, mr_iid, "⏳ 审核中，请稍候...")
+            pending = gl.create_discussion(project_id, mr_iid, pending_msg)
             pending_discussion_id = pending["id"]
             pending_note_id = pending["note_id"]
         except Exception as e:

@@ -68,3 +68,17 @@ def test_format_inline_comment_with_suggestion():
     assert "[high/bug]" in body
     assert "```suggestion:-0+0" in body
     assert "new" in body
+
+
+def test_comments_sorted_by_severity_desc(blocking_severities):
+    # 输入乱序,输出应按 severity 降序:critical > high > medium > low
+    comments = [_comment("low"), _comment("critical"), _comment("medium"), _comment("high")]
+    rr = reviewer.decide({"status": "success", "comments": comments})
+    assert [c["severity"] for c in rr.comments] == ["critical", "high", "medium", "low"]
+
+
+def test_comments_sorted_by_path_within_same_severity(blocking_severities):
+    # 同 severity 内按 path 升序,保证稳定可预期
+    comments = [_comment("high", path="z.py"), _comment("high", path="a.py"), _comment("high", path="m.py")]
+    rr = reviewer.decide({"status": "success", "comments": comments})
+    assert [c["path"] for c in rr.comments] == ["a.py", "m.py", "z.py"]

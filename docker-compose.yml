@@ -61,9 +61,9 @@ services:
       # --- 卡点策略: 命中这些 severity 则 reject (阻止 merge) ---
       - BLOCKING_SEVERITIES=${BLOCKING_SEVERITIES:-critical,high}
 
-      # --- 存储 / 并发背压 ---
+      # --- 存储 / 队列提示 ---
       - STORAGE_PATH=${STORAGE_PATH:-/var/ocr/ocr.db}
-      - MAX_QUEUED_TASKS=${MAX_QUEUED_TASKS:-10}
+      - QUEUE_NOTICE_THRESHOLD=${QUEUE_NOTICE_THRESHOLD:-5}
       - GIT_COMMAND_TIMEOUT=${GIT_COMMAND_TIMEOUT:-300}
 
       # --- Webhook 配置 (可选，用于 GitLab 直接触发) ---

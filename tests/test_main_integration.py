@@ -72,3 +72,45 @@ def test_webhook_skipped_for_non_matching_branch_and_title(app_client):
     )
     assert r.status_code == 200
     assert r.json()["status"] == "skipped"
+
+
+class _FakeGL:
+    """记录 pending discussion 文案的假 GitLab 客户端。"""
+    def __init__(self):
+        self.last_msg = None
+
+    def create_discussion(self, project_id, mr_iid, msg):
+        self.last_msg = msg
+        return {"id": "d1", "note_id": "n1"}
+
+
+def _post_review(client, monkeypatch, queued_count):
+    """用指定排队数触发一次 webhook,返回 (响应, 假客户端)。"""
+    import app.webhooks
+    from app import storage
+
+    fake = _FakeGL()
+    monkeypatch.setattr(app.webhooks, "get_gitlab", lambda: fake)
+    monkeypatch.setattr(storage, "get_queued_count", lambda: queued_count)
+    r = client.post(
+        "/gitlab/codeReview",
+        json=_mr_payload(),
+        headers={"X-Gitlab-Event": "Merge Request Hook"},
+    )
+    return r, fake
+
+
+def test_webhook_pending_message_when_queue_below_threshold(app_client, monkeypatch):
+    # 排队数未超过阈值(默认 5):首次评论为「审核中」
+    r, fake = _post_review(app_client, monkeypatch, queued_count=2)
+    assert r.status_code == 200
+    assert fake.last_msg is not None
+    assert "审核中" in fake.last_msg
+
+
+def test_webhook_queued_message_when_queue_above_threshold(app_client, monkeypatch):
+    # 排队数超过阈值(默认 5):首次评论为「已进入待审核队列」
+    r, fake = _post_review(app_client, monkeypatch, queued_count=10)
+    assert r.status_code == 200
+    assert fake.last_msg is not None
+    assert "已进入待审核队列" in fake.last_msg

@@ -147,9 +147,13 @@ def decide(result_json: dict) -> ReviewResult:
             markdown_summary=_build_error_note(result_json),
         )
 
-    # 按 severity 分组
+    # 评论按严重程度降序排列(同 severity 内按 path、行号升序,稳定可预期),
+    # 让严重问题在 GitLab 评论流里先展示、先回写
+    comments.sort(key=lambda c: (c.get("path", ""), c.get("start_line") or c.get("end_line") or 0))
+    comments.sort(key=lambda c: _severity_rank(c.get("severity", "")), reverse=True)
+
+    # 按 severity 分组(comments 已排序,blocking 天然按严重程度降序)
     blocking = [c for c in comments if (c.get("severity", "") or "").lower() in config.BLOCKING_SEVERITIES]
-    blocking.sort(key=lambda c: _severity_rank(c.get("severity", "")), reverse=True)
 
     approve = len(blocking) == 0
 

@@ -73,6 +73,42 @@ def do_review_sync(req: ReviewRequest) -> ReviewResponse:
             repo_cache.cleanup_worktree(wt_path)
 
 
+def _check_mr_open(gl, project_id: str, mr_iid: str):
+    """查询 MR 是否仍处于 open 状态。
+
+    返回 True=open;False=已关闭/合并/锁定;None=查询失败(无法判断)。
+    调用方对 None 应保守地继续审核(不因查询失败而漏审)。
+    """
+    try:
+        mr = gl.get_merge_request(project_id, mr_iid)
+    except Exception as e:
+        log.warning(f"无法查询 MR !{mr_iid} 状态(保守继续审核): {e}")
+        return None
+    state = (mr.get("state") or "").lower()
+    return state == "opened"
+
+
+def _cancel_closed_mr(gl, task) -> None:
+    """MR 已关闭/合并:把 pending 评论改为取消说明并 resolve,任务标记为 cancelled。
+
+    posted 反映取消说明是否成功发出。cancelled 任务不被 repost_worker 重试
+    (MR 已关闭,取消说明丢失影响极小)。
+    """
+    msg = "ℹ️ MR 已关闭/合并，取消 review 任务。"
+    posted = 0
+    if task.pending_discussion_id and task.pending_note_id:
+        if gl.update_note(task.project_id, task.mr_iid,
+                          task.pending_discussion_id, task.pending_note_id, msg):
+            gl.resolve_discussion(task.project_id, task.mr_iid, task.pending_discussion_id)
+            posted = 1
+    else:
+        # 没有 pending discussion(创建时失败),直接发一条 note
+        if gl.post_note(task.project_id, task.mr_iid, msg):
+            posted = 1
+    storage.update_status(task.task_id, "cancelled", summary=msg, gitlab_posted=posted)
+    log.info(f"Task {task.task_id} MR !{task.mr_iid} 已关闭/合并,取消审核 (posted={posted})")
+
+
 def do_review_async(task_id: str):
     """异步 worker:跑 review + resolve discussion + 回写 inline + 落库结果。"""
     task = storage.get_task(task_id)
@@ -87,6 +123,12 @@ def do_review_async(task_id: str):
     storage.update_status(task_id, "running")
 
     gl = get_gitlab()
+
+    # 从队列取回后先校验 MR 是否仍 open;已关闭/合并则取消,避免白跑 ocr(省 LLM 成本)
+    if gl and _check_mr_open(gl, task.project_id, task.mr_iid) is False:
+        _cancel_closed_mr(gl, task)
+        return
+
     clone_url = task.project_url
     if gl:
         clone_url = gl.clone_url(task.project_url)
