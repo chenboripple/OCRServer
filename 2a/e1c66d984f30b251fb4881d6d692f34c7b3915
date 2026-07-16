@@ -1,0 +1,41 @@
+tests/test_repo_cache.py
+  dd3cb8fa01d8a30a 1-28
+.github/workflows/ci.yml
+  dd3cb8fa01d8a30a 1-26
+pytest.ini
+  dd3cb8fa01d8a30a 1-5
+tests/test_gitlab_client.py
+  dd3cb8fa01d8a30a 1-91
+tests/test_storage.py
+  dd3cb8fa01d8a30a 1-70
+tests/test_main_integration.py
+  dd3cb8fa01d8a30a 1-72
+tests/conftest.py
+  dd3cb8fa01d8a30a 1-68
+tests/test_trigger_check.py
+  dd3cb8fa01d8a30a 1-30
+requirements-dev.txt
+  dd3cb8fa01d8a30a 1-3
+tests/test_reviewer.py
+  dd3cb8fa01d8a30a 1-70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "2ae1c66d984f30b251fb4881d6d692f34c7b3915",
+  "prompts": {
+    "dd3cb8fa01d8a30a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ad71ad4f-e726-4479-b28b-e3a154178e45",
+        "model": "glm-5.2"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 475,
+      "total_deletions": 12,
+      "accepted_lines": 1564,
+      "overriden_lines": 0
+    }
+  }
+}
