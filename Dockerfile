@@ -32,35 +32,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 # ============================================
 # 预装 OpenCodeReview (ocr CLI)
 # ============================================
-# 注意事项:
-#   1. 固定版本 @1.7.6 - 避免自动更新引入坏版本
-#   2. 验证二进制大小 - 曾发生 npm 下载截断(几MB而非~45MB)
-#   3. 重要: npm 包只是启动器，真正二进制在首次运行时下载
-#   4. entrypoint.sh 启动时会再次验证，如损坏可自动重装
-RUN npm install -g @alibaba-group/open-code-review@1.7.6 \
-    && echo "触发 ocr 二进制下载 (首次运行)... " \
-    && timeout 60 ocr --version 2>&1 | head -20 || true \
-    && echo "查找实际二进制文件..." \
-    && OCR_NPM_DIR=$(npm root -g)/@alibaba-group/open-code-review \
-    && echo "npm 包目录: $OCR_NPM_DIR" \
-    && OCR_BIN=$(find "$OCR_NPM_DIR" /usr/lib/node_modules -name "opencodereview" -type f 2>/dev/null | head -1) \
-    && if [ -z "$OCR_BIN" ]; then \
-         echo "在 npm 目录未找到，检查用户缓存目录..."; \
-         OCR_BIN=$(find /root/.cache ~/.cache -name "opencodereview" -type f 2>/dev/null | head -1); \
-       fi \
-    && if [ -z "$OCR_BIN" ]; then \
-         echo "警告: 构建时二进制未下载，将在 entrypoint.sh 启动时重试"; \
-       else \
-         echo "找到二进制文件: $OCR_BIN"; \
-         ls -la "$OCR_BIN"; \
-         SIZE=$(stat -c%s "$OCR_BIN"); \
-         echo "二进制大小: $SIZE bytes"; \
-         if [ "$SIZE" -lt 40000000 ]; then \
-           echo "ERROR: ocr 二进制文件可能被截断(期望 >=40MB，实际: $SIZE bytes)"; \
-           exit 1; \
-         fi; \
-         echo "ocr CLI 预装成功 ✓"; \
-       fi
+# 安装/校验逻辑抽到 scripts/install_ocr.sh(与 entrypoint.sh / start.sh 共用)
+# --strict: 构建期二进制截断即失败(曾发生 npm 下载截断,几MB而非~45MB)
+COPY scripts/install_ocr.sh /app/scripts/install_ocr.sh
+RUN chmod +x /app/scripts/install_ocr.sh && /app/scripts/install_ocr.sh --strict
 
 # ============================================
 # Python 应用配置

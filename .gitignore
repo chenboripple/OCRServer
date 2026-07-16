@@ -52,3 +52,7 @@ cache/
 # ── 操作系统 ──
 .DS_Store
 Thumbs.db
+
+# ── 临时脚本/提交消息(勿提交) ──
+/_apply_*.py
+/_commit_msg.txt

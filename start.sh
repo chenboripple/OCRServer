@@ -1,8 +1,9 @@
 #!/bin/bash
 # ============================================
 # OCR Server 本地开发启动脚本
-# 功能: 自动检查并安装 OpenCodeReview (ocr CLI)
 # 适用: Linux/macOS 本地开发环境
+# 功能: 自动检查/安装 ocr CLI,然后以 --reload 启动
+# ocr 安装逻辑抽到 scripts/install_ocr.sh(与 entrypoint.sh / Dockerfile 共用)
 # ============================================
 
 # 项目根目录
@@ -40,36 +41,10 @@ if [ -f ".env" ]; then
 fi
 
 # ------------------------------
-# 检查并安装 ocr CLI
+# 检查/安装 ocr CLI(公共脚本)
 # ------------------------------
-OCR_VERSION="${OCR_VERSION:-1.7.6}"
-OCR_MIN_SIZE="${OCR_MIN_SIZE:-40000000}"
-
-if ! command -v ocr &> /dev/null; then
-    echo ""
-    echo "============================================"
-    echo "  自动安装 OpenCodeReview CLI"
-    echo "============================================"
-
-    if ! command -v npm &> /dev/null; then
-        echo "❌ 未检测到 npm，请先安装 Node.js 20+"
-        echo "   下载地址: https://nodejs.org/"
-        exit 1
-    fi
-
-    echo "正在安装 @alibaba-group/open-code-review@$OCR_VERSION ..."
-    npm install -g "@alibaba-group/open-code-review@$OCR_VERSION"
-
-    # 验证安装
-    if ! command -v ocr &> /dev/null; then
-        echo "❌ ocr 安装失败，请检查网络连接或手动安装"
-        exit 1
-    fi
-
-    echo "✅ ocr 安装成功: $(ocr --version)"
-else
-    echo "✅ ocr 已安装: $(ocr --version)"
-fi
+source scripts/install_ocr.sh
+ensure_ocr 0 || { echo "❌ ocr 安装失败"; exit 1; }
 
 # ------------------------------
 # 启动服务
