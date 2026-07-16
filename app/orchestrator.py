@@ -7,7 +7,7 @@ from . import config
 from . import reviewer
 from . import storage
 from .repost import post_to_gitlab
-from .rule_updater import update_rules_from_feishu
+from .rule_updater import apply_review_language, update_rules_from_feishu
 from .runtime import executor, repo_cache, get_gitlab
 from .schemas import ReviewRequest, ReviewResponse
 
@@ -44,8 +44,9 @@ def do_review_sync(req: ReviewRequest) -> ReviewResponse:
         target_sha = repo_cache.get_ref_sha(req.project_id, req.target_branch)
         log.info(f"工作树: {wt_path}, to={to_sha}, from={target_sha}")
 
-        # 每次 review 前从飞书同步最新审核规则
+        # 每次 review 前从飞书同步最新审核规则 + 写入输出语言设置
         update_rules_from_feishu()
+        apply_review_language()
 
         result_json = reviewer.run_ocr(wt_path, target_sha, to_sha)
         rr = reviewer.decide(result_json)
@@ -100,8 +101,9 @@ def do_review_async(task_id: str):
         target_sha = repo_cache.get_ref_sha(task.project_id, task.target_branch)
         log.info(f"Worktree: {wt_path}, to={to_sha}, from={target_sha}")
 
-        # 每次 review 前从飞书同步最新审核规则
+        # 每次 review 前从飞书同步最新审核规则 + 写入输出语言设置
         update_rules_from_feishu()
+        apply_review_language()
 
         # 2. 跑 ocr
         result_json = reviewer.run_ocr(wt_path, target_sha, to_sha)

@@ -113,3 +113,29 @@ def update_rules_from_feishu() -> None:
         log.warning("读取飞书电子表格失败(不影响审核流程): %s", e)
     except Exception as e:
         log.warning("更新 ocr 配置时发生意外错误(不影响审核流程): %s", e)
+
+
+def apply_review_language() -> None:
+    """
+    把 REVIEW_LANGUAGE 写入 ocr config.json 顶层 language 字段。
+
+    ocr 用该字段驱动 LLM 用指定语言输出问题描述与总结(默认 English)。
+    每次审核前调用,与飞书规则更新共用同一份 config.json。
+    未配置(空串)则不写,沿用 ocr 默认;已是目标值则跳过,避免无谓写入。
+    """
+    lang = (config.REVIEW_LANGUAGE or "").strip()
+    if not lang:
+        log.debug("REVIEW_LANGUAGE 未配置,跳过语言设置")
+        return
+
+    cfg_path = ensure_ocr_config_dir()
+    try:
+        existing = _load_existing_config(cfg_path)
+        if existing.get("language") == lang:
+            log.debug("ocr 配置 language 已是 %s,跳过", lang)
+            return
+        existing["language"] = lang
+        _write_config(cfg_path, existing)
+        log.info("✅ ocr 审核输出语言已设为: %s", lang)
+    except Exception as e:
+        log.warning("写入 ocr 输出语言失败(不影响审核流程): %s", e)

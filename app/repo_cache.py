@@ -142,28 +142,16 @@ class RepoCache:
         返回 (worktree_path, source_commit_sha)。
         ocr 在 worktree_path 上跑:ocr review --repo <wt> --from <target_sha> --to <source_commit>
         """
-        # 清理上一次可能遗留的工作树（防止 fetch 时 git 拒绝写入已 checkout 的分支）
+        # 仅 prune 已失效的 worktree 注册(目录已不存在的);绝不删除其他活跃 worktree,
+        # 否则并发同项目审核会互相删掉对方正在跑 ocr 的 worktree(见审计 P1)。
         bare = self._bare_path(project_id)
         if bare.exists():
-            self._cleanup_stale_worktrees(project_id, bare)
+            try:
+                self._run_git(["worktree", "prune"], cwd=bare)
+            except RepoError:
+                log.debug("git worktree prune 无变化")
 
         self.fetch_branches(project_id, clone_url, [source_branch, target_branch])
         wt_path, commit_sha = self.make_worktree(project_id, source_branch)
         return wt_path, commit_sha
 
-    def _cleanup_stale_worktrees(self, project_id: str, bare: Path) -> None:
-        """清理属于此项目的遗留工作树（上次审核失败没清理干净的）。"""
-        # 删除工作树目录
-        if self.work_dir.exists():
-            for item in self.work_dir.iterdir():
-                if item.name.startswith(project_id):
-                    try:
-                        shutil.rmtree(item, ignore_errors=True)
-                        log.info(f"清理遗留工作树: {item}")
-                    except Exception as e:
-                        log.warning(f"清理工作树失败: {item}, {e}")
-        # 让 git 清理内部 worktree 引用
-        try:
-            self._run_git(["worktree", "prune"], cwd=bare)
-        except RepoError:
-            log.debug("git worktree prune 无变化")

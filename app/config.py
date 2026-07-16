@@ -51,6 +51,10 @@ OCR_LLM_MODEL = _env("OCR_LLM_MODEL", "GLM-AUTO")
 OCR_USE_ANTHROPIC = _env_bool("OCR_USE_ANTHROPIC", True)
 # 关闭 ocr 后台自动更新,避免引入坏版本(本次 exe 截断的教训)
 OCR_NO_UPDATE = _env_bool("OCR_NO_UPDATE", True)
+# 审核输出语言:写入 ocr config.json 顶层 language 字段,
+# ocr 用它驱动 LLM 用该语言输出问题描述与总结(默认 Chinese)。
+# 取任意语言名(如 English / Chinese);留空则不写、沿用 ocr 默认(English)。
+REVIEW_LANGUAGE = _env("REVIEW_LANGUAGE", "Chinese")
 
 # ── GitLab ─────────────────────────────────────────────────
 GITLAB_URL = _env("GITLAB_URL", "")              # 如 https://gitlab.example.com
@@ -65,10 +69,13 @@ WORK_DIR = Path(_env("WORK_DIR", "/var/ocr/work"))   # ocr 实际跑的工作树
 GIT_COMMAND_TIMEOUT = _env_int("GIT_COMMAND_TIMEOUT", 300)  # git 命令超时(秒),大仓库需要更长时间
 
 # ── 卡点策略 ───────────────────────────────────────────────
-# 命中这些 severity 则 reject(卡 MR)
-BLOCKING_SEVERITIES = set(
-    s.strip() for s in _env("BLOCKING_SEVERITIES", "critical,high").split(",") if s.strip()
-)
+# 命中这些 severity 则 reject(卡 MR)。统一转小写:reviewer 比对侧也会 lower()。
+def _parse_blocking_severities(raw: str) -> set[str]:
+    """解析卡点 severity 列表(逗号分隔),统一转小写,跳过空段。"""
+    return {s.strip().lower() for s in raw.split(",") if s.strip()}
+
+
+BLOCKING_SEVERITIES = _parse_blocking_severities(_env("BLOCKING_SEVERITIES", "critical,high"))
 
 # ── Webhook ───────────────────────────────────────────────
 WEBHOOK_SECRET = _env("WEBHOOK_SECRET", "")

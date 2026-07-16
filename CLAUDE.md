@@ -115,6 +115,7 @@ All configuration via environment variables (see `.env.example`):
 | `OCR_LLM_URL` | `http://your-llm-endpoint.example.com:8320` | Internal LLM endpoint (Anthropic-compatible) |
 | `GITLAB_TOKEN` | - | Project/Group Access Token for posting comments |
 | `OCR_NO_UPDATE` | `true` | Disable ocr auto-update (prevents broken versions) |
+| `REVIEW_LANGUAGE` | `Chinese` | ocr review output language (problem descriptions & summary); empty = ocr default (English) |
 
 ## API Endpoints
 
