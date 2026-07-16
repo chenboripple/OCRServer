@@ -1,0 +1,31 @@
+Dockerfile
+  dd3cb8fa01d8a30a 35-38
+start.sh
+  dd3cb8fa01d8a30a 5-6,44,46-47
+start.bat
+  dd3cb8fa01d8a30a 45
+entrypoint.sh
+  dd3cb8fa01d8a30a 3-5,14-16,18-19,21-23,25
+scripts/install_ocr.sh
+  dd3cb8fa01d8a30a 1-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "922f7107d686603b2c064ed8df264edae3eec2a7",
+  "prompts": {
+    "dd3cb8fa01d8a30a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ad71ad4f-e726-4479-b28b-e3a154178e45",
+        "model": "glm-5.2"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 231,
+      "total_deletions": 207,
+      "accepted_lines": 1299,
+      "overriden_lines": 0
+    }
+  }
+}
