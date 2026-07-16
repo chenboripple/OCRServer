@@ -1,0 +1,35 @@
+app/storage/repositories/task_repository.py
+  dd3cb8fa01d8a30a 1-137
+app/storage/repositories/__init__.py
+  dd3cb8fa01d8a30a 1
+app/storage/service.py
+  dd3cb8fa01d8a30a 1-38
+app/storage/models.py
+  dd3cb8fa01d8a30a 1-25
+app/storage/repositories/webhook_repository.py
+  dd3cb8fa01d8a30a 1-37
+app/storage/connection.py
+  dd3cb8fa01d8a30a 1,5,10,24
+app/storage/__init__.py
+  dd3cb8fa01d8a30a 1-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "b9e1aceae8b335edee0d05c91692f95b24ae21d2",
+  "prompts": {
+    "dd3cb8fa01d8a30a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ad71ad4f-e726-4479-b28b-e3a154178e45",
+        "model": "glm-5.2"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 355,
+      "total_deletions": 258,
+      "accepted_lines": 1456,
+      "overriden_lines": 0
+    }
+  }
+}
