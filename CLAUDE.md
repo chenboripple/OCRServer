@@ -48,7 +48,7 @@ docker-compose build
 docker-compose up -d
 ```
 
-See `DOCKER_QUICKSTART.md` for detailed Docker operations.
+See `docs/Docker部署.md` for detailed Docker operations.
 
 ### Local Development (Native)
 
@@ -112,7 +112,7 @@ All configuration via environment variables (see `.env.example`):
 | `MAX_CONCURRENT_REVIEWS` | `2` | Concurrent MR reviews (LLM capacity limited) |
 | `OCR_CONCURRENCY` | `8` | File-level concurrency within one ocr run |
 | `BLOCKING_SEVERITIES` | `critical,high` | Severities that block merge (reject) |
-| `OCR_LLM_URL` | `http://10.0.0.0:8320` | Internal LLM endpoint (Anthropic-compatible) |
+| `OCR_LLM_URL` | `http://your-llm-endpoint.example.com:8320` | Internal LLM endpoint (Anthropic-compatible) |
 | `GITLAB_TOKEN` | - | Project/Group Access Token for posting comments |
 | `OCR_NO_UPDATE` | `true` | Disable ocr auto-update (prevents broken versions) |
 

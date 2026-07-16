@@ -104,7 +104,7 @@ sudo systemctl status ocr
 
 # 验证
 curl http://localhost:8000/health
-# 期望: {"status":"ok","ocr_bin":"ocr","llm_url":"http://10.0.0.0:8320"}
+# 期望: {"status":"ok","ocr_bin":"ocr","llm_url":"http://your-llm-endpoint.example.com:8320"}
 ```
 
 ## 五、手动测试(不接 GitLab)

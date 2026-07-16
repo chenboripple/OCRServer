@@ -111,7 +111,7 @@ GitLab Merge Request Webhook 接口。
 
 OCR Server 本身不直接调用 GitHub/GitLab 页面，而是通过 OCR CLI 连接你配置的 LLM 端点：
 
-- `OCR_LLM_URL`：例如 `http://10.0.0.0:8320`
+- `OCR_LLM_URL`：例如 `http://your-llm-endpoint.example.com:8320`
 
 如果你使用的是内网 Anthropic 兼容服务，请确保该地址在部署环境中可达。
 
@@ -122,8 +122,10 @@ OCR Server 本身不直接调用 GitHub/GitLab 页面，而是通过 OCR CLI 连
 
 服务会基于该地址构造 clone URL，并在审核完成后回写讨论和评论。
 
-## 进度与设计文档
+## 文档
 
+- [部署指南](docs/部署.md)
+- [Docker 快速开始](docs/Docker部署.md)
 - [功能文档](docs/功能文档/README.md)
 - [设计文档](docs/设计文档/README.md)
 - [进度文档](docs/进度文档.md)

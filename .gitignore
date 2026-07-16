@@ -1,0 +1,54 @@
+# ── Python ──
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.Python
+build/
+dist/
+
+# ── 虚拟环境 ──
+.venv/
+venv/
+env/
+ENV/
+
+# ── 测试 / 覆盖率 ──
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── 环境变量与密钥(绝不提交) ──
+.env
+.env.local
+.env.*.local
+*.secrets
+secrets/
+
+# ── 运行时数据 / 缓存 ──
+*.db
+*.db-journal
+/var/ocr/
+repos/
+work/
+cache/
+
+# ── 打包产物 ──
+*.tar.gz
+*.zip
+
+# ── 日志 / 临时 ──
+*.log
+*.tmp
+*.bak
+
+# ── IDE / 编辑器 ──
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── 操作系统 ──
+.DS_Store
+Thumbs.db
