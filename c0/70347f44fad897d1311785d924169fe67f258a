@@ -1,0 +1,23 @@
+README.md
+  fe38d8faa75cd385 3-5,9-15,19,21,35-42,51,53-55,57,59,69,74-79,81,96,98-100,102,124,126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "c070347f44fad897d1311785d924169fe67f258a",
+  "prompts": {
+    "fe38d8faa75cd385": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "413ef9d3-c681-4a3d-87d7-79cd08c97a5e",
+        "model": "glm-5.2"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 41,
+      "total_deletions": 61,
+      "accepted_lines": 41,
+      "overriden_lines": 0
+    }
+  }
+}
