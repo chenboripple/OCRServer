@@ -1,0 +1,41 @@
+scripts/install_ocr.sh
+  fe38d8faa75cd385 9-10
+.env.example
+  fe38d8faa75cd385 36-38,43
+deploy/README.md
+  fe38d8faa75cd385 54-55,174
+CLAUDE.md
+  fe38d8faa75cd385 88-89
+app/orchestrator.py
+  fe38d8faa75cd385 173,184-186
+start.bat
+  fe38d8faa75cd385 47
+app/gitlab_client.py
+  fe38d8faa75cd385 56
+app/reviewer.py
+  fe38d8faa75cd385 79-84
+app/repost.py
+  fe38d8faa75cd385 40-52,54-55,60-64,82-83
+.gitattributes
+  fe38d8faa75cd385 1-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "db765bd0ae7d2240bccc921a08f8edb21dbb7c73",
+  "prompts": {
+    "fe38d8faa75cd385": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "413ef9d3-c681-4a3d-87d7-79cd08c97a5e",
+        "model": "glm-5.2"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 112,
+      "total_deletions": 31,
+      "accepted_lines": 56,
+      "overriden_lines": 0
+    }
+  }
+}
