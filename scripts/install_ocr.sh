@@ -6,7 +6,8 @@
 # ============================================
 
 # 版本与二进制最小字节(可被环境变量覆盖)
-OCR_VERSION="${OCR_VERSION:-1.7.6}"
+# 不锁版本:默认 latest 装最新发布版;如需固定版本可设 OCR_VERSION=1.7.6
+OCR_VERSION="${OCR_VERSION:-latest}"
 OCR_MIN_SIZE="${OCR_MIN_SIZE:-40000000}"  # 40MB
 
 # 查找实际二进制文件(ocr.js 只是启动器,真正二进制在别处)

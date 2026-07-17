@@ -37,16 +37,31 @@ async def repost_worker():
             log.warning(f"Repost worker error: {e}")
 
 
-def post_to_gitlab(gl: GitLabClient, req: ReviewRequest, rr: reviewer.ReviewResult) -> None:
-    """回写 inline 评论 + 汇总 note 到 GitLab MR。"""
+def post_to_gitlab(
+    gl: GitLabClient,
+    req: ReviewRequest,
+    rr: reviewer.ReviewResult,
+    *,
+    post_summary: bool = True,
+) -> None:
+    """回写 inline 评论 + (可选) 汇总 note 到 GitLab MR。
+
+    post_summary=False 时仅回写 inline 评论、不发汇总 note。
+    异步审核流程已用结论(summary_text + markdown_summary)更新了 pending discussion,
+    若这里再发一次 markdown_summary 会出现「两条总结」,故该场景传 False。
+    """
     if not rr.comments:
-        gl.post_note(req.project_id, req.mr_iid, rr.markdown_summary)
+        if post_summary:
+            gl.post_note(req.project_id, req.mr_iid, rr.markdown_summary)
         return
 
     diff_refs = gl.get_diff_refs(req.project_id, req.mr_iid)
     if not diff_refs:
-        log.warning("无法获取 MR diff_refs,inline 评论将跳过,仅发汇总 note")
-        gl.post_note(req.project_id, req.mr_iid, rr.markdown_summary)
+        if post_summary:
+            log.warning("无法获取 MR diff_refs,inline 评论将跳过,仅发汇总 note")
+            gl.post_note(req.project_id, req.mr_iid, rr.markdown_summary)
+        else:
+            log.warning("无法获取 MR diff_refs,inline 评论将跳过")
         return
 
     success = 0
@@ -64,4 +79,5 @@ def post_to_gitlab(gl: GitLabClient, req: ReviewRequest, rr: reviewer.ReviewResu
             failed.append(c)
 
     log.info(f"GitLab 回写: {success}/{len(rr.comments)} inline 成功, {len(failed)} 转汇总")
-    gl.post_note(req.project_id, req.mr_iid, rr.markdown_summary)
+    if post_summary:
+        gl.post_note(req.project_id, req.mr_iid, rr.markdown_summary)

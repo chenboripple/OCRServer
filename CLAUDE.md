@@ -85,8 +85,8 @@ curl -X POST http://localhost:8000/review \
 See `deploy/README.md` for full instructions. Key commands:
 
 ```bash
-# ocr CLI installation (required)
-sudo npm install -g @alibaba-group/open-code-review@1.7.6
+# ocr CLI installation (required, latest version)
+sudo npm install -g @alibaba-group/open-code-review@latest
 
 # Verify ocr binary (critical: ~45MB, not truncated)
 ls -la $(npm root -g)/@alibaba-group/open-code-review/node_modules/@alibaba-group/ocr-linux-x64/bin/opencodereview

@@ -170,7 +170,7 @@ def do_review_async(task_id: str):
                 log.warning(f"Failed to resolve discussion: {e}")
                 # 留着让 repost_worker 补发
 
-            # 5. 回写 inline comments + summary note
+            # 5. 回写 inline comments(结论已写入 pending discussion,不再重复发 summary note)
             if rr.comments:
                 try:
                     req = ReviewRequest(
@@ -181,7 +181,9 @@ def do_review_async(task_id: str):
                         mr_iid=task.mr_iid,
                         commit_sha=task.commit_sha,
                     )
-                    post_to_gitlab(gl, req, rr)
+                    # post_summary: 仅当 pending conclusion 写入失败(gitlab_posted=0)时才补发 summary;
+                    # 否则 markdown_summary 已在 conclusion_body 内写进 pending discussion,再发会造成两条总结
+                    post_to_gitlab(gl, req, rr, post_summary=(gitlab_posted == 0))
                 except Exception as e:
                     log.warning(f"GitLab inline post failed: {e}")
 

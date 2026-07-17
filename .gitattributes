@@ -1,0 +1,11 @@
+# 统一文本文件行尾为 LF。
+# 部署目标是 Linux:.sh 脚本若为 CRLF 会破坏 shebang(#!/bin/bash\r),导致执行报 not found。
+# Windows 批处理 .bat/.cmd 保留 CRLF;二进制资源标记 binary 不转换。
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.gif binary

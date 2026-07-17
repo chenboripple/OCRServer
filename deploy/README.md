@@ -51,8 +51,8 @@ sudo apt-get install -y nodejs
 # 2. Python 3.10+ 和 git
 sudo apt-get install -y python3 python3-venv python3-pip git
 
-# 3. 装 ocr(固定版本,避免自动更新引入坏版本)
-sudo npm install -g @alibaba-group/open-code-review@1.7.6
+# 3. 装 ocr(最新版;运行时自动更新已由 OCR_NO_UPDATE=true 单独禁用,防二进制截断)
+sudo npm install -g @alibaba-group/open-code-review@latest
 
 # 4. ★ 校验 ocr 二进制完整性(重要!踩过 exe 截断的坑)
 ls -la $(npm root -g)/@alibaba-group/open-code-review/node_modules/@alibaba-group/ocr-linux-x64/bin/opencodereview
@@ -171,4 +171,4 @@ sudo rm -rf /var/ocr/repos/*.git /var/ocr/work/*
 
 - ocr 过滤步骤偶发 `Review filter: failed to parse LLM response` warning(glm 返回非 JSON) -> 不影响结果,仅质量略降,见 `warnings[]`
 - 单次审核 3-7 分钟、数十万 token,大 MR 注意 LLM 配额
-- ocr 自动更新可能引入坏版本 -> 已设 `OCR_NO_UPDATE=true`,固定 `@1.7.6`
+- ocr 运行时自动更新可能引入坏版本(曾导致二进制截断) -> 已设 `OCR_NO_UPDATE=true` 禁止;安装时不锁版本,跟随最新发布版

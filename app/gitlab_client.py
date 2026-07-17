@@ -53,7 +53,7 @@ class GitLabClient:
             raise GitLabError("project_url 为空")
 
         # 从 GITLAB_URL 提取协议和主机
-        base = self.base  # 例: http://example.com
+        base = self.base  # 例: http://gitlab.example.com
         base_protocol, base_host = base.split("://", 1)
         base_host = base_host.split("/")[0]  # 去掉路径，只保留 host
 

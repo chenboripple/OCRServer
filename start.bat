@@ -44,7 +44,7 @@ REM ------------------------------
 REM 检查并安装 ocr CLI
 REM 注意: 权威逻辑见 scripts/install_ocr.sh (bash);Windows 在此独立维护
 REM ------------------------------
-set OCR_VERSION=1.7.6
+set OCR_VERSION=latest
 
 where ocr >nul 2>&1
 if errorlevel 1 (
