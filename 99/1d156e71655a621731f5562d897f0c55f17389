@@ -1,0 +1,23 @@
+scripts/update_from_github.sh
+  c858c61eb88322d5 1-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "991d156e71655a621731f5562d897f0c55f17389",
+  "prompts": {
+    "c858c61eb88322d5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3560e93b-1ae5-4c68-9189-ac2f91da0f10",
+        "model": "glm-5.2"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 112,
+      "total_deletions": 0,
+      "accepted_lines": 112,
+      "overriden_lines": 0
+    }
+  }
+}
