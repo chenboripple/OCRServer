@@ -182,16 +182,27 @@ class GitLabClient:
         line: int,
         body: str,
         diff_refs: dict,
+        use_old_line: bool = False,
     ) -> bool:
+        """回写一条 inline 评论。
+
+        use_old_line=False(默认)定位到新行(new_line,新增/变更行);
+        use_old_line=True 定位到旧行(old_line,删除行场景)。
+        定位失败(行号超出 diff 范围、position 无法解析、限流耗尽等)返回 False,
+        交由调用方决定是否换 old_line 重试或转兜底 note。
+        """
         position = {
             "position_type": "text",
             "new_path": path,
             "old_path": path,
-            "new_line": line,
             "base_sha": diff_refs["base_sha"],
             "start_sha": diff_refs["start_sha"],
             "head_sha": diff_refs["head_sha"],
         }
+        if use_old_line:
+            position["old_line"] = line
+        else:
+            position["new_line"] = line
         try:
             self._api(
                 "POST",

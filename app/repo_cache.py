@@ -94,22 +94,42 @@ class RepoCache:
         log.info(f"fetch 分支: project={project_id}, branches={branches}")
         # fetch 这些分支,建立 FETCH_HEAD;refspec 写到 refs/heads/<branch> 便于后续引用
         refspecs = [f"+refs/heads/{b}:refs/heads/{b}" for b in branches]
-        self._run_git(["fetch", clone_url] + refspecs + ["--tags"], cwd=bare)
+        cmd = ["fetch", clone_url] + refspecs + ["--tags"]
+        try:
+            self._run_git(cmd, cwd=bare)
+        except RepoError as e:
+            # 分支被某工作树"检出"占用 -> git 拒绝更新 refs/heads/<branch>。
+            # prune 清理"目录已不存在"的失效工作树注册后重试一次,释放被占用的分支。
+            # 正常情况 make_worktree 用 --detach 不占用分支,不会触发;此为兜底,
+            # 应对历史遗留的非 detach 工作树注册或异常残留。仍失败则抛出,由上层降级。
+            if "checked out" in str(e):
+                log.warning(f"fetch 被检出分支拒绝,prune 后重试一次: {e}")
+                try:
+                    self._run_git(["worktree", "prune"], cwd=bare)
+                except RepoError:
+                    log.debug("worktree prune 无变化")
+                self._run_git(cmd, cwd=bare)  # 重试;再失败则抛出
+            else:
+                raise
         log.info(f"fetch 完成")
         return bare
 
     def make_worktree(self, project_id: str, branch: str) -> tuple[Path, str]:
-        """从 bare cache 创建临时工作树并 checkout 到 branch,返回 (worktree_path, commit_sha)。
+        """从 bare cache 创建临时工作树(detached HEAD),返回 (worktree_path, commit_sha)。
 
         ocr 在该 worktree 上跑。用 worktree 而非 clone,秒级且省空间。
+        --detach 以分离 HEAD 检出 branch 对应 commit,不把 branch 标记为"已检出"。
+        否则后续 fetch 该分支会被 git 拒绝更新(fatal: refusing to fetch into branch
+        ... checked out at <worktree>),在并发同项目审核 / 上次崩溃残留孤儿工作树时必现。
+        ocr 只读工作树(file_read/code_search),detached HEAD 不影响审核结果。
         """
         bare = self._bare_path(project_id)
         if not bare.exists():
             raise RepoError(f"bare cache 不存在: {bare},请先 fetch")
         wt_name = f"{project_id}-{branch}-{uuid.uuid4().hex[:8]}"
         wt_path = self.work_dir / wt_name
-        # worktree add 会 checkout;分支已在 fetch 时写入 refs/heads/<branch>
-        self._run_git(["worktree", "add", str(wt_path), branch], cwd=bare)
+        # --detach:分离 HEAD;分支 ref 不被任何工作树占用,fetch 可自由更新 refs/heads/<branch>
+        self._run_git(["worktree", "add", "--detach", str(wt_path), branch], cwd=bare)
         commit_sha = self._run_git(["rev-parse", "HEAD"], cwd=wt_path).strip()
         return wt_path, commit_sha
 

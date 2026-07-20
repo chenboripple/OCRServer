@@ -26,13 +26,24 @@ class FakeResp:
 
 
 def _make_client(monkeypatch):
-    monkeypatch.setattr(gitlab_client.config, "GITLAB_URL", "https://gitlab.example.com")
-    monkeypatch.setattr(gitlab_client.config, "GITLAB_TOKEN", "tok")
-    return GitLabClient()
+    # 显式传参:GitLabClient.__init__ 的默认参数在类定义时已捕获(空串),
+    # monkeypatch config 属性无法改变已捕获的默认值,故必须显式传入。
+    return GitLabClient(gitlab_url="https://gitlab.example.com", token="tok")
 
 
 def _install(monkeypatch, handler):
     monkeypatch.setattr(gitlab_client.urllib.request, "urlopen", lambda req, *a, **k: handler(req))
+
+
+def _capture_handler(captured):
+    """构造一个 handler:记录 POST body 到 captured['body'],返回成功响应。"""
+
+    def handler(req):
+        if req.data is not None:
+            captured["body"] = json.loads(req.data.decode("utf-8"))
+        return FakeResp({"id": "d1", "notes": [{"id": 1}]})
+
+    return handler
 
 
 # ── 纯函数:URL 解析 ──────────────────────────────
@@ -49,10 +60,9 @@ def test_extract_project_path_adds_git_suffix():
 
 
 def test_clone_url(monkeypatch):
-    monkeypatch.setattr(gitlab_client.config, "GITLAB_URL", "https://gitlab.example.com")
-    monkeypatch.setattr(gitlab_client.config, "GITLAB_TOKEN", "TOK")
     monkeypatch.setattr(gitlab_client.config, "GITLABClone_AUTH_USER", "oauth2")
-    assert GitLabClient().clone_url("https://gitlab.example.com/g/p.git") == "https://oauth2:TOK@gitlab.example.com/g/p.git"
+    c = GitLabClient(gitlab_url="https://gitlab.example.com", token="TOK")
+    assert c.clone_url("https://gitlab.example.com/g/p.git") == "https://oauth2:TOK@gitlab.example.com/g/p.git"
 
 
 # ── API 调用(urllib mock)──────────────────────────
@@ -89,3 +99,37 @@ def test_resolve_discussion_success(monkeypatch):
     c = _make_client(monkeypatch)
     _install(monkeypatch, lambda req: FakeResp({"resolved": True}))
     assert c.resolve_discussion("1", "2", "d1") is True
+
+
+# ── post_discussion: use_old_line 切换 new_line/old_line ──────────
+_DIFF_REFS = {"base_sha": "b", "start_sha": "s", "head_sha": "h"}
+
+
+def test_post_discussion_uses_new_line_by_default(monkeypatch):
+    c = _make_client(monkeypatch)
+    captured = {}
+    _install(monkeypatch, _capture_handler(captured))
+    assert c.post_discussion("1", "2", "a.py", 5, "body", _DIFF_REFS) is True
+    pos = captured["body"]["position"]
+    assert pos["new_line"] == 5
+    assert "old_line" not in pos
+
+
+def test_post_discussion_uses_old_line_when_flagged(monkeypatch):
+    c = _make_client(monkeypatch)
+    captured = {}
+    _install(monkeypatch, _capture_handler(captured))
+    assert c.post_discussion("1", "2", "a.py", 7, "body", _DIFF_REFS, use_old_line=True) is True
+    pos = captured["body"]["position"]
+    assert pos["old_line"] == 7
+    assert "new_line" not in pos
+
+
+def test_post_discussion_failure_returns_false(monkeypatch):
+    c = _make_client(monkeypatch)
+    c.max_retries = 0  # 不重试,避免 time.sleep 拖慢测试
+
+    def fail(req):
+        raise urllib.error.HTTPError(req.full_url, 400, "bad position", {}, BytesIO(b"{}"))
+    monkeypatch.setattr(gitlab_client.urllib.request, "urlopen", fail)
+    assert c.post_discussion("1", "2", "a.py", 5, "body", _DIFF_REFS) is False
