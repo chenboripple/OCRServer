@@ -1,0 +1,33 @@
+tests/test_trigger_check.py
+  18e989398d79e33f 2,11,15-16,34-58
+app/trigger_check.py
+  18e989398d79e33f 5-8,11,14,19-22,43-119,126,134-151,159,167
+app/config.py
+  18e989398d79e33f 38-40,92-99,110
+app/reviewer.py
+  18e989398d79e33f 91
+app/webhooks.py
+  18e989398d79e33f 62,64-68
+.env.example
+  18e989398d79e33f 24-25,84-86,90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "ffd2ef0afa440d902d8b66db568fb91690b65dd0",
+  "prompts": {
+    "18e989398d79e33f": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "550ebf97-2f7a-47c6-b8ad-d44cbb0eabc7",
+        "model": "copilot/gpt-5.3-codex"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 165,
+      "total_deletions": 21,
+      "accepted_lines": 162,
+      "overriden_lines": 0
+    }
+  }
+}
