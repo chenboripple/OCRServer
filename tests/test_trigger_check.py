@@ -1,4 +1,5 @@
 """审核触发策略:目标分支 + MR 标题前缀。"""
+from app import trigger_check
 from app.trigger_check import should_trigger_review
 
 
@@ -7,10 +8,12 @@ def _skip(reason):
 
 
 def test_required_branches_always_trigger():
-    # master/release(含 release/x 前缀)始终触发
+    # master/release/outer-master/hotfix(含 release/x 前缀)始终触发
     assert should_trigger_review("master", "任意标题") is None
     assert should_trigger_review("release", "任意标题") is None
     assert should_trigger_review("release/v1.0", "任意标题") is None
+    assert should_trigger_review("outer-master", "任意标题") is None
+    assert should_trigger_review("hotfix", "任意标题") is None
     assert should_trigger_review("origin/master", "任意标题") is None  # origin/ 前缀被规整
 
 
@@ -28,3 +31,28 @@ def test_non_matching_title_skips():
     assert _skip(should_trigger_review("dev", "oct release"))
     assert _skip(should_trigger_review("dev", ""))
     assert _skip(should_trigger_review("dev", "普通标题"))
+
+
+def test_feishu_project_rule_has_priority(monkeypatch):
+    # 项目命中飞书规则时,仅按飞书分支判断(优先于兜底 title 前缀)
+    monkeypatch.setattr(
+        trigger_check,
+        "_get_project_required_branches_from_feishu",
+        lambda project_name: {"outer-master", "hotfix"} if project_name == "ocr-server" else None,
+    )
+
+    assert should_trigger_review("outer-master", "普通标题", "ocr-server") is None
+    assert _skip(should_trigger_review("master", "OCR: 强制触发", "ocr-server"))
+
+
+def test_fallback_when_project_not_in_feishu(monkeypatch):
+    # 飞书未命中项目时,回退到默认 master/release + title 前缀策略
+    monkeypatch.setattr(
+        trigger_check,
+        "_get_project_required_branches_from_feishu",
+        lambda project_name: None,
+    )
+
+    assert should_trigger_review("master", "普通标题", "unknown-project") is None
+    assert should_trigger_review("feature/demo", "OCR: 新功能", "unknown-project") is None
+    assert _skip(should_trigger_review("feature/demo", "普通标题", "unknown-project"))

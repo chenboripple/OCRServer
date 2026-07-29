@@ -88,7 +88,7 @@ def run_ocr(repo_path: Path, target_branch: str, source_sha: str) -> dict:
             capture_output=True,
             text=True,
             env=_ocr_env(),
-            timeout=config.OCR_TIMEOUT_MIN * 60 + 120,  # 比 ocr 自身 timeout 多 2 分钟兜底
+            timeout=config.OCR_TIMEOUT_MIN * 60,
         )
     except subprocess.TimeoutExpired as e:
         raise ReviewError(f"ocr 执行超时: {e}") from e

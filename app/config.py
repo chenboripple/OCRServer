@@ -35,9 +35,9 @@ OCR_BIN = _env("OCR_BIN", "ocr")
 # ocr review 单文件并发
 OCR_CONCURRENCY = _env_int("OCR_CONCURRENCY", 8)
 # ocr review 任务超时(分钟)
-OCR_TIMEOUT_MIN = _env_int("OCR_TIMEOUT_MIN", 10)
-# 单个 MR 请求的总超时(秒),应 > OCR_TIMEOUT_MIN * 60
-REQUEST_TIMEOUT_SEC = _env_int("REQUEST_TIMEOUT_SEC", 900)
+OCR_TIMEOUT_MIN = _env_int("OCR_TIMEOUT_MIN", 40)
+# 单个 MR 请求的总超时(秒),建议 > OCR_TIMEOUT_MIN * 60
+REQUEST_TIMEOUT_SEC = _env_int("REQUEST_TIMEOUT_SEC", 3600)
 # 同时处理的 MR 数(线程池大小)
 MAX_CONCURRENT_REVIEWS = _env_int("MAX_CONCURRENT_REVIEWS", 2)
 
@@ -89,6 +89,14 @@ FEISHU_APP_ID = _env("FEISHU_APP_ID", "")
 FEISHU_APP_SECRET = _env("FEISHU_APP_SECRET", "")
 FEISHU_SPREADSHEET_TOKEN = _env("FEISHU_SPREADSHEET_TOKEN", "")  # 飞书电子表格 URL 中的 spreadsheet_token
 FEISHU_SHEET_RANGE = _env("FEISHU_SHEET_RANGE", "Sheet1!A:B")    # 读取范围,默认取 A、B 两列
+# Webhook 触发策略用飞书规则(项目名 -> 目标分支列表)配置
+# 文档格式:第一列项目名,第二列允许触发审核的目标分支(逗号分隔)
+FEISHU_TRIGGER_ENABLED = _env_bool("FEISHU_TRIGGER_ENABLED", False)
+FEISHU_TRIGGER_SPREADSHEET_TOKEN = _env(
+    "FEISHU_TRIGGER_SPREADSHEET_TOKEN",
+    FEISHU_SPREADSHEET_TOKEN,
+)
+FEISHU_TRIGGER_SHEET_RANGE = _env("FEISHU_TRIGGER_SHEET_RANGE", "Sheet1!A:B")
 
 # ── ocr 配置文件路径 ───────────────────────────────────────
 # ocr 的 ~/.opencodereview/config.json,程序启动时/每次 review 前可写入自定义规则
@@ -99,7 +107,7 @@ OCR_CONFIG_PATH = Path(
 # ── 审核触发策略 ────────────────────────────────────────────
 # 目标分支为这些分支时,始终触发 OCR 审核
 REQUIRED_REVIEW_BRANCHES = set(
-    s.strip() for s in _env("REQUIRED_REVIEW_BRANCHES", "master,release").split(",") if s.strip()
+    s.strip() for s in _env("REQUIRED_REVIEW_BRANCHES", "master,release,outer-master,hotfix").split(",") if s.strip()
 )
 # 非必需分支时,仅当 MR 标题去空白转小写后的前缀等于此值时触发审核;空字符串表示禁用标题触发
 REVIEW_TITLE_TRIGGER = _env("REVIEW_TITLE_TRIGGER", "ocr")

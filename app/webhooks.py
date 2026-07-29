@@ -59,9 +59,13 @@ async def handle_code_review(request: Request, background_tasks: BackgroundTasks
             status_code=400,
         )
 
-    # 6. 审核触发策略判断:目标分支为 master/release,或 MR 标题前缀为 ocr 时才触发
+    # 6. 审核触发策略判断:飞书项目规则优先,未命中项目再走 master/release + 标题前缀兜底
     gl = get_gitlab()
-    trigger_skip_reason = should_trigger_review(target_branch, object_attributes.get("title", ""))
+    trigger_skip_reason = should_trigger_review(
+        target_branch,
+        object_attributes.get("title", ""),
+        project.get("name", ""),
+    )
     if trigger_skip_reason:
         log.info("跳过审核: %s (MR !%s %s -> %s)", trigger_skip_reason, mr_iid, source_branch, target_branch)
         if gl:
