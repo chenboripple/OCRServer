@@ -141,6 +141,22 @@ def decide(result_json: dict) -> ReviewResult:
 
     # status 异常 -> 不放行(避免假绿)
     if status and status != "success":
+        if status == "skipped":
+            return ReviewResult(
+                approve=True,
+                status=status,
+                summary_text=(
+                    f"✅ 无可检查文件，跳过审核并通过 | files={summary_obj.get('files_reviewed', '?')}, "
+                    f"comments={summary_obj.get('comments', len(comments))}, "
+                    f"elapsed={summary_obj.get('elapsed', '?')}, tokens={summary_obj.get('total_tokens', '?')}"
+                ),
+                reject_reason="",
+                stats=summary_obj,
+                comments=comments,
+                warnings=warnings,
+                session_id=session_id,
+                markdown_summary=_build_summary_note(result_json, True, {}, {}, []),
+            )
         return ReviewResult(
             approve=False,
             status=status,

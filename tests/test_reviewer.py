@@ -48,6 +48,22 @@ def test_abnormal_status_rejects(blocking_severities):
     assert "异常" in rr.summary_text
 
 
+def test_skipped_status_is_treated_as_pass(blocking_severities):
+    rr = reviewer.decide(
+        {
+            "status": "skipped",
+            "message": "No supported files changed.",
+            "comments": [],
+            "summary": {"files_reviewed": 0, "comments": 0, "elapsed": 0, "total_tokens": 0},
+            "tool_calls": {"total": 0, "by_tool": {}},
+        }
+    )
+    assert rr.approve is True
+    assert rr.status == "skipped"
+    assert "跳过审核" in rr.summary_text
+    assert rr.reject_reason == ""
+
+
 def test_parse_json_output_pure():
     out = reviewer._parse_json_output('{"status":"success","comments":[]}')
     assert out["status"] == "success"
