@@ -58,7 +58,7 @@ RUN chmod +x entrypoint.sh
 # 创建数据目录并设置权限
 #   /var/ocr/repos - bare 仓库缓存 (持久化 volume)
 #   /var/ocr/work  - 临时工作树 (临时 volume)
-RUN mkdir -p /var/ocr/repos /var/ocr/work \
+RUN mkdir -p /var/ocr/repos /var/ocr/work /var/ocr/db \
     && chown -R ocr:ocr /var/ocr
 
 # 配置 npm 全局路径到用户目录 (非 root 用户也能全局安装)
