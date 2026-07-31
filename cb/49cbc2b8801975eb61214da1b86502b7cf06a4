@@ -1,0 +1,27 @@
+tests/test_storage.py
+  b00c655b46a8eb1a 2-3,73-128
+app/static/console/index.html
+  b00c655b46a8eb1a 731-743,774,795,847,875
+app/storage/connection.py
+  b00c655b46a8eb1a 15-19,63-83,100-111,130-143,164-175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "cb49cbc2b8801975eb61214da1b86502b7cf06a4",
+  "prompts": {
+    "b00c655b46a8eb1a": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "2f15cf82-74b8-46c6-9d22-1cb9742b4824",
+        "model": "copilot/gpt-5.3-codex"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 139,
+      "total_deletions": 5,
+      "accepted_lines": 1112,
+      "overriden_lines": 0
+    }
+  }
+}
