@@ -1,0 +1,49 @@
+app/orchestrator.py
+  b00c655b46a8eb1a 27-37,43,45,64-72,91-93,176
+app/storage/service.py
+  b00c655b46a8eb1a 27-29
+app/repo_cache.py
+  b00c655b46a8eb1a 15,22-35,57-58,96
+app/storage/__init__.py
+  b00c655b46a8eb1a 9,17,34-37,57,59
+app/webhooks.py
+  b00c655b46a8eb1a 89
+app/storage/repositories/console_repository.py
+  b00c655b46a8eb1a 1-391
+app/main.py
+  b00c655b46a8eb1a 29,35
+app/static/console/index.html
+  b00c655b46a8eb1a 1-977
+app/storage/repositories/task_repository.py
+  b00c655b46a8eb1a 3,22,47,74-75,78,86-146
+app/storage/models.py
+  b00c655b46a8eb1a 16
+tests/test_console.py
+  b00c655b46a8eb1a 1-100
+app/storage/connection.py
+  b00c655b46a8eb1a 8-14,54,58-98
+app/feishu_client.py
+  b00c655b46a8eb1a 78,88-89
+app/routes/console.py
+  b00c655b46a8eb1a 1-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "240a9907c6b156774f8b89d481f11d5812fe871e",
+  "prompts": {
+    "b00c655b46a8eb1a": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "2f15cf82-74b8-46c6-9d22-1cb9742b4824",
+        "model": "copilot/gpt-5.3-codex"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 1735,
+      "total_deletions": 22,
+      "accepted_lines": 1724,
+      "overriden_lines": 0
+    }
+  }
+}
