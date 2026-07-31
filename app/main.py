@@ -11,8 +11,10 @@ Webhook 处理 app/webhooks、回写补偿 app/repost、共享单例 app/runtime
 """
 import asyncio
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from . import config
 from . import orchestrator
@@ -25,6 +27,10 @@ logging.basicConfig(
 log = logging.getLogger("ocr-server")
 
 app = FastAPI(title="OCR Server", version="2.0.0")
+
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+if _STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 from .routes import console, health, review, status, webhook  # noqa: E402
 
