@@ -29,12 +29,6 @@
       box-sizing: border-box;
     }
 
-    html,
-    body,
-    #app {
-      height: 100%;
-    }
-
     body {
       margin: 0;
       font-family: "IBM Plex Sans", "Noto Sans SC", "Segoe UI", sans-serif;
@@ -44,13 +38,8 @@
         radial-gradient(circle at 90% 5%, #ffe4cb 0, transparent 22%),
         linear-gradient(165deg, #f8fbff 0%, #f2f6ff 48%, #f6fbff 100%);
       min-height: 100vh;
-      overflow: hidden;
-    }
-
-    #app {
-      display: flex;
-      flex-direction: column;
-      min-height: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
     }
 
     .top {
@@ -61,7 +50,7 @@
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      padding: 16px 24px;
+      padding: 14px 16px;
       border-bottom: 1px solid rgba(16, 33, 59, 0.08);
       backdrop-filter: blur(10px);
       background: rgba(247, 250, 255, 0.85);
@@ -99,16 +88,13 @@
     }
 
     .layout {
-      padding: 18px 20px 24px;
+      padding: 14px 12px 20px;
       display: grid;
       grid-template-columns: 1fr;
       gap: 16px;
-      max-width: 1500px;
+      max-width: 1680px;
       margin: 0 auto;
       width: 100%;
-      flex: 1 1 auto;
-      min-height: 0;
-      overflow: auto;
       overflow-x: hidden;
     }
 
@@ -324,7 +310,6 @@
       display: grid;
       grid-template-columns: 1fr 2fr;
       gap: 16px;
-      min-height: 420px;
     }
 
     .split > .card {
@@ -438,8 +423,6 @@
     .findings-list {
       display: grid;
       gap: 10px;
-      max-height: 620px;
-      overflow: auto;
       padding: 12px;
       min-width: 0;
     }
@@ -578,7 +561,7 @@
         text-align: left;
         white-space: normal;
       }
-      .layout { padding: 12px; }
+      .layout { padding: 10px 8px 16px; }
       .toolbar { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
       .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .grid-2 { grid-template-columns: 1fr; }
@@ -609,6 +592,12 @@
     }
 
     @media (max-width: 480px) {
+      .top {
+        padding: 12px 10px;
+      }
+      .layout {
+        padding: 8px 6px 14px;
+      }
       .brand {
         gap: 8px;
       }
