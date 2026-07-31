@@ -9,6 +9,8 @@ from .. import storage
 router = APIRouter()
 
 _CONSOLE_HTML = Path(__file__).resolve().parents[1] / "static" / "console" / "console.html"
+_CONSOLE_ASSET_DIR = _CONSOLE_HTML.parent
+_CONSOLE_ALLOWED_ASSETS = {"console.css", "console.js"}
 
 
 @router.get("/console", include_in_schema=False)
@@ -16,6 +18,16 @@ def console_page():
     if not _CONSOLE_HTML.exists():
         raise HTTPException(status_code=404, detail="Console page not found")
     return FileResponse(_CONSOLE_HTML)
+
+
+@router.get("/console/assets/{asset_name}", include_in_schema=False)
+def console_assets(asset_name: str):
+    if asset_name not in _CONSOLE_ALLOWED_ASSETS:
+        raise HTTPException(status_code=404, detail="Console asset not found")
+    asset = _CONSOLE_ASSET_DIR / asset_name
+    if not asset.exists():
+        raise HTTPException(status_code=404, detail="Console asset not found")
+    return FileResponse(asset)
 
 
 @router.get("/api/console/tasks")
