@@ -8,7 +8,7 @@ from .. import storage
 
 router = APIRouter()
 
-_CONSOLE_HTML = Path(__file__).resolve().parents[1] / "static" / "console" / "index.html"
+_CONSOLE_HTML = Path(__file__).resolve().parents[1] / "static" / "console" / "console.html"
 
 
 @router.get("/console", include_in_schema=False)

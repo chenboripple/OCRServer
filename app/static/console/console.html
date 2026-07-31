@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OCR Server Console</title>
+  <link rel="stylesheet" href="/static/console/console.css" />
+  <script defer src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script defer src="/static/console/console.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header class="top">
+      <div class="brand">
+        <span class="dot"></span>
+        <div>
+          <h1>OCR Review Console</h1>
+          <div class="muted">Vue3 read-only portal for requests and analysis results</div>
+        </div>
+      </div>
+      <div class="muted top-meta">Last refresh: {{ formatTime(lastRefreshAt) }}</div>
+    </header>
+
+    <main class="layout">
+      <section class="card">
+        <div class="toolbar">
+          <div class="field">
+            <label>Status</label>
+            <select v-model="filters.status">
+              <option value="">All</option>
+              <option value="queued">queued</option>
+              <option value="running">running</option>
+              <option value="done">done</option>
+              <option value="failed">failed</option>
+              <option value="cancelled">cancelled</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>Source</label>
+            <select v-model="filters.source">
+              <option value="">All</option>
+              <option value="webhook">webhook</option>
+              <option value="api">api</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>Approve</label>
+            <select v-model="filters.approve">
+              <option value="">All</option>
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>Project ID</label>
+            <input v-model.trim="filters.project_id" placeholder="project id" />
+          </div>
+
+          <div class="field">
+            <label>MR IID</label>
+            <input v-model.trim="filters.mr_iid" placeholder="mr iid" />
+          </div>
+
+          <div class="field field-span-2">
+            <label>Keyword</label>
+            <input v-model.trim="filters.q" placeholder="task id, branch, summary, error, session" />
+          </div>
+
+          <div class="field">
+            <label>Actions</label>
+            <div class="inline-actions">
+              <button @click="reloadAll">Search</button>
+              <button class="ghost" @click="resetFilters">Reset</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-title">
+          <span>Dashboard</span>
+          <div class="section-actions">
+            <select v-model.number="dashboardDays" @change="loadDashboard">
+              <option :value="7">7 days</option>
+              <option :value="14">14 days</option>
+              <option :value="30">30 days</option>
+            </select>
+            <button class="ghost" @click="loadDashboard">Refresh</button>
+          </div>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><div class="label">Total tasks</div><div class="value">{{ dashboard.overview.total || 0 }}</div></div>
+          <div class="kpi"><div class="label">Done</div><div class="value">{{ dashboard.overview.done_count || 0 }}</div></div>
+          <div class="kpi"><div class="label">Failed</div><div class="value">{{ dashboard.overview.failed_count || 0 }}</div></div>
+          <div class="kpi"><div class="label">Queued + Running</div><div class="value">{{ (dashboard.overview.queued_count || 0) + (dashboard.overview.running_count || 0) }}</div></div>
+          <div class="kpi"><div class="label">Approve Rate</div><div class="value">{{ pct(dashboard.overview.approve_rate || 0) }}</div></div>
+          <div class="kpi"><div class="label">Total Tokens</div><div class="value">{{ number(dashboard.stats.total_tokens || 0) }}</div></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-title">
+          <span>Tasks</span>
+          <span class="muted">{{ taskData.total }} total</span>
+        </div>
+        <div
+          class="table-wrap"
+          ref="taskTableWrap"
+          @scroll="onTaskTableScroll"
+          :class="{
+            'show-left-shadow': taskTableCanScroll && !taskTableAtLeft,
+            'show-right-shadow': taskTableCanScroll && !taskTableAtRight
+          }"
+        >
+          <table class="tasks-table">
+            <thead>
+              <tr>
+                <th class="col-project-name">Project</th>
+                <th class="col-mr">MR</th>
+                <th class="col-status">Status</th>
+                <th class="col-approve">Approve</th>
+                <th class="col-time">Dispatched</th>
+                <th class="col-time col-started">Started</th>
+                <th class="col-time col-finished">Finished</th>
+                <th class="col-elapsed">Elapsed(s)</th>
+                <th class="col-task">Task</th>
+                <th class="col-source">Source</th>
+                <th class="col-findings">Findings</th>
+                <th class="col-stats">Stats</th>
+                <th class="col-summary">Summary/Error</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="t in taskData.items"
+                :key="t.task_id"
+                @click="selectTask(t.task_id)"
+                class="task-row"
+                :class="{ active: t.task_id === selectedTaskId }"
+              >
+                <td class="col-project-name">
+                  <div>{{ projectName(t) }}</div>
+                  <div class="muted">{{ t.project_id }}</div>
+                </td>
+                <td class="col-mr">
+                  <div>!{{ t.mr_iid }}</div>
+                  <div class="muted">{{ t.source_branch }} -> {{ t.target_branch }}</div>
+                </td>
+                <td class="col-status"><span class="badge" :class="'s-' + t.status">{{ t.status }}</span></td>
+                <td class="col-approve">
+                  <span v-if="t.approve === true" class="badge s-done">pass</span>
+                  <span v-else-if="t.approve === false" class="badge s-failed">reject</span>
+                  <span v-else class="muted">-</span>
+                </td>
+                <td class="col-time">{{ compactTime(t.created_at) }}</td>
+                <td class="col-time col-started">{{ compactTime(t.started_at) }}</td>
+                <td class="col-time col-finished">{{ compactTime(t.finished_at) }}</td>
+                <td class="col-elapsed">{{ elapsedSeconds(t.started_at, t.finished_at) }}</td>
+                <td class="col-task"><span class="muted">{{ short(t.task_id) }}</span></td>
+                <td class="col-source">{{ t.source || '-' }}</td>
+                <td class="col-findings">
+                  <span class="sev-critical">C {{ t.finding_counts.critical }}</span>
+                  <span class="sev-high"> H {{ t.finding_counts.high }}</span>
+                  <span class="sev-medium"> M {{ t.finding_counts.medium }}</span>
+                  <span class="sev-low"> L {{ t.finding_counts.low }}</span>
+                </td>
+                <td class="col-stats">
+                  <div>files: {{ t.stats.files_reviewed || '-' }}</div>
+                  <div>tokens: {{ t.stats.total_tokens || '-' }}</div>
+                </td>
+                <td class="col-summary task-summary" :title="[t.summary, t.error].filter(Boolean).join(' | ')">
+                  <div :title="t.summary || ''">{{ t.summary || '-' }}</div>
+                  <div v-if="t.error" class="muted mt-4" :title="t.error">{{ t.error }}</div>
+                </td>
+              </tr>
+              <tr v-if="taskData.items.length === 0">
+                <td colspan="13" class="muted">No tasks.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <div>Page {{ taskPage }} / {{ taskPages }}</div>
+          <div class="pager-actions">
+            <button class="ghost" :disabled="taskPage <= 1" @click="changeTaskPage(taskPage - 1)">Prev</button>
+            <button class="ghost" :disabled="taskPage >= taskPages" @click="changeTaskPage(taskPage + 1)">Next</button>
+          </div>
+        </div>
+        <div v-if="taskError" class="err">{{ taskError }}</div>
+      </section>
+
+      <section class="split">
+        <article class="card">
+          <div class="section-title">
+            <span>Task Detail</span>
+            <div class="task-detail-head">
+              <span class="muted task-detail-id">{{ selectedTaskId || 'none selected' }}</span>
+              <button
+                v-if="taskDetail && taskDetail.session_id"
+                class="ghost btn-sm"
+                @click="copySessionId"
+              >
+                Copy session_id
+              </button>
+            </div>
+          </div>
+          <div class="detail" v-if="taskDetail">
+            <div class="grid-2">
+              <div class="kv"><div class="k">Task ID</div><div class="v">{{ taskDetail.task_id }}</div></div>
+              <div class="kv"><div class="k">Session ID</div><div class="v">{{ taskDetail.session_id || '-' }}</div></div>
+              <div class="kv"><div class="k">Project / MR</div><div class="v">{{ taskDetail.project_id }} / !{{ taskDetail.mr_iid }}</div></div>
+              <div class="kv"><div class="k">Source</div><div class="v">{{ taskDetail.source }}</div></div>
+              <div class="kv"><div class="k">Status</div><div class="v">{{ taskDetail.status }}</div></div>
+              <div class="kv"><div class="k">Approve</div><div class="v">{{ taskDetail.approve === null ? '-' : taskDetail.approve }}</div></div>
+              <div class="kv"><div class="k">Created</div><div class="v">{{ taskDetail.created_at }}</div></div>
+              <div class="kv"><div class="k">Started</div><div class="v">{{ taskDetail.started_at || '-' }}</div></div>
+              <div class="kv"><div class="k">Finished</div><div class="v">{{ taskDetail.finished_at || '-' }}</div></div>
+              <div class="kv"><div class="k">Elapsed (s)</div><div class="v">{{ elapsedSeconds(taskDetail.started_at, taskDetail.finished_at) }}</div></div>
+              <div class="kv"><div class="k">Branches</div><div class="v">{{ taskDetail.source_branch }} -> {{ taskDetail.target_branch }}</div></div>
+              <div class="kv"><div class="k">Commit</div><div class="v">{{ taskDetail.commit_sha || '-' }}</div></div>
+            </div>
+
+            <div class="kv">
+              <div class="k">Summary</div>
+              <div class="v">{{ taskDetail.summary || '-' }}</div>
+            </div>
+
+            <div class="kv" v-if="taskDetail.error">
+              <div class="k">Error</div>
+              <div class="v error-text">{{ taskDetail.error }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">Markdown Summary</div>
+              <pre>{{ taskDetail.markdown_summary || '-' }}</pre>
+            </div>
+
+            <div class="kv">
+              <div class="k">Warnings</div>
+              <pre>{{ pretty(taskDetail.warnings || []) }}</pre>
+            </div>
+
+            <details class="raw" v-if="taskDetail.raw_result">
+              <summary>Raw OCR Result (JSON)</summary>
+              <pre class="raw-pre">{{ pretty(taskDetail.raw_result) }}</pre>
+            </details>
+          </div>
+          <div class="detail muted" v-else>Select one task from the list.</div>
+          <div v-if="detailError" class="err">{{ detailError }}</div>
+          <div v-if="copiedTip" class="muted copied-tip">{{ copiedTip }}</div>
+        </article>
+
+        <article class="card">
+          <div class="section-title">
+            <span>Findings</span>
+            <span class="muted">{{ findingData.total || 0 }} total</span>
+          </div>
+
+          <div class="toolbar toolbar-findings">
+            <div class="field">
+              <label>Severity</label>
+              <select v-model="findingFilters.severity" @change="loadFindings(1)">
+                <option value="">All</option>
+                <option value="critical">critical</option>
+                <option value="high">high</option>
+                <option value="medium">medium</option>
+                <option value="low">low</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Category</label>
+              <input v-model.trim="findingFilters.category" @keyup.enter="loadFindings(1)" placeholder="category" />
+            </div>
+            <div class="field">
+              <label>Path</label>
+              <input v-model.trim="findingFilters.path" @keyup.enter="loadFindings(1)" placeholder="file path" />
+            </div>
+            <div class="field">
+              <label>Actions</label>
+              <button class="ghost" @click="loadFindings(1)" :disabled="!selectedTaskId">Apply</button>
+            </div>
+          </div>
+
+          <div class="findings-list">
+            <div class="finding" v-for="f in findingData.items" :key="f.id">
+              <div class="head">
+                <span class="badge" :class="'s-' + (taskDetail?.status || 'done')">#{{ f.position }}</span>
+                <span :class="'sev-' + (f.severity || 'low')">{{ f.severity || 'unknown' }}</span>
+                <span class="muted">{{ f.category || 'other' }}</span>
+                <span class="path">{{ f.path }}:{{ f.start_line || f.end_line || '?' }}</span>
+              </div>
+              <div class="finding-content">{{ f.content }}</div>
+              <div v-if="f.existing_code">
+                <div class="muted">Existing code</div>
+                <div class="code">{{ f.existing_code }}</div>
+              </div>
+              <div v-if="f.suggestion_code">
+                <div class="muted">Suggestion</div>
+                <div class="code">{{ f.suggestion_code }}</div>
+              </div>
+            </div>
+            <div class="muted" v-if="findingData.items.length === 0">No findings.</div>
+          </div>
+
+          <div class="pager">
+            <div>Page {{ findingPage }} / {{ findingPages }}</div>
+            <div class="pager-actions">
+              <button class="ghost" :disabled="findingPage <= 1" @click="loadFindings(findingPage - 1)">Prev</button>
+              <button class="ghost" :disabled="findingPage >= findingPages" @click="loadFindings(findingPage + 1)">Next</button>
+            </div>
+          </div>
+          <div v-if="findingError" class="err">{{ findingError }}</div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+</body>
+</html>
