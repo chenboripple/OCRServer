@@ -1,0 +1,60 @@
+tests/test_storage.py
+  697d6f8aa8e5f95e 75-110
+app/storage/repositories/task_repository.py
+  697d6f8aa8e5f95e 30-31,190-197,200-206,210-222
+app/storage/models.py
+  697d6f8aa8e5f95e 24-25
+app/main.py
+  2e74ad12f1c62576 22,49
+app/repost.py
+  697d6f8aa8e5f95e 20-24,34,54,56,58-59,70-76
+  2e74ad12f1c62576 33,35,37-41,44,46-53,55,57,60-67,69
+app/storage/connection.py
+  2e74ad12f1c62576 25-29
+  697d6f8aa8e5f95e 61-62,86-87
+app/config.py
+  697d6f8aa8e5f95e 87-90
+  2e74ad12f1c62576 83-85,108-109
+app/trigger_check.py
+  2e74ad12f1c62576 12-13,20-23,55-56,84,86,88-89,91,95-131,133-170,172-173
+  697d6f8aa8e5f95e 93-94
+tests/test_trigger_check.py
+  697d6f8aa8e5f95e 59-99
+app/storage/__init__.py
+  697d6f8aa8e5f95e 42-47,65
+app/storage/service.py
+  697d6f8aa8e5f95e 7,34-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "e250853e0256e662d411daf163b2b4696bf31a22",
+  "prompts": {
+    "2e74ad12f1c62576": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "dd95ef89-8055-45c1-abe4-83138a3a978c",
+        "model": "copilot/gpt-5.3-codex"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 133,
+      "total_deletions": 42,
+      "accepted_lines": 128,
+      "overriden_lines": 0
+    },
+    "697d6f8aa8e5f95e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "97881f5e-02cd-409d-ba5e-4fe45a6aaa38",
+        "model": "claude-opus"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 161,
+      "total_deletions": 13,
+      "accepted_lines": 161,
+      "overriden_lines": 0
+    }
+  }
+}
