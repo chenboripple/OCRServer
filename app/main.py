@@ -26,12 +26,13 @@ log = logging.getLogger("ocr-server")
 
 app = FastAPI(title="OCR Server", version="2.0.0")
 
-from .routes import health, review, status, webhook  # noqa: E402
+from .routes import console, health, review, status, webhook  # noqa: E402
 
 app.include_router(health.router)
 app.include_router(status.router)
 app.include_router(review.router)
 app.include_router(webhook.router)
+app.include_router(console.router)
 
 
 @app.on_event("startup")

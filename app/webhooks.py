@@ -86,6 +86,7 @@ async def handle_code_review(request: Request, background_tasks: BackgroundTasks
         target_branch=target_branch,
         commit_sha=commit_sha,
         project_url=project_url,
+        source="webhook",
         pending_discussion_id=None,
         pending_note_id=None,
         created_at=received_at,

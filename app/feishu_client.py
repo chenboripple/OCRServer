@@ -75,7 +75,7 @@ class FeishuClient:
         data = resp.json()
         if data.get("code") != 0:
             raise FeishuError(
-                f"读取飞书电子表格失败(spreadsheet_token={spreadsheet_token}): "
+                "读取飞书电子表格失败: "
                 f"{data.get('msg', resp.text)}"
             )
 
@@ -85,8 +85,8 @@ class FeishuClient:
         # 过滤全空行
         filtered = [row for row in values if any(cell.strip() for cell in row if cell)]
         log.info(
-            "飞书电子表格读取成功: spreadsheet_token=%s, range=%s, 行数=%d",
-            spreadsheet_token, range_, len(filtered),
+            "飞书电子表格读取成功: range=%s, 行数=%d",
+            range_, len(filtered),
         )
         return filtered
 

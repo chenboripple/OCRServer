@@ -1,5 +1,6 @@
 """任务仓储:任务的创建、查询、状态更新。"""
 import datetime
+import json
 import sqlite3
 import uuid
 from typing import List, Optional
@@ -18,6 +19,7 @@ def _row_to_task(row) -> ReviewTask:
         commit_sha=row["commit_sha"],
         project_url=row["project_url"],
         status=row["status"],
+        source=row["source"] or "webhook",
         approve=bool(row["approve"]) if row["approve"] is not None else None,
         summary=row["summary"],
         stats_json=row["stats_json"],
@@ -42,6 +44,7 @@ class TaskRepository:
         target_branch: str,
         commit_sha: str,
         project_url: str,
+        source: str = "webhook",
         pending_discussion_id: Optional[str] = None,
         pending_note_id: Optional[str] = None,
         created_at: Optional[str] = None,
@@ -68,17 +71,79 @@ class TaskRepository:
                 conn.execute("""
                     INSERT INTO review_task
                     (task_id, project_id, mr_iid, source_branch, target_branch, commit_sha,
-                     project_url, status, pending_discussion_id, pending_note_id, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     project_url, status, source, pending_discussion_id, pending_note_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     task_id, project_id, mr_iid, source_branch, target_branch, commit_sha,
-                    project_url, "queued", pending_discussion_id, pending_note_id, created_at,
+                    project_url, "queued", source, pending_discussion_id, pending_note_id, created_at,
                 ))
             except sqlite3.IntegrityError:
                 # 并发下另一事务已插入同 (project_id, mr_iid, commit_sha),回退为返回已有任务
                 existing = conn.execute(_find_sql, _find_params).fetchone()
                 return existing["task_id"], False
         return task_id, True
+
+    def save_review_artifacts(self, task_id: str, result_json: dict, review_result) -> None:
+        """保存完整审核结果与逐条问题明细。"""
+        now = datetime.datetime.now().isoformat()
+        warnings_json = json.dumps(review_result.warnings or [], ensure_ascii=False)
+        raw_result_json = json.dumps(result_json or {}, ensure_ascii=False)
+
+        with _db() as conn:
+            conn.execute(
+                """
+                INSERT INTO review_result
+                (task_id, status, approve, summary_text, reject_reason, session_id,
+                 markdown_summary, warnings_json, raw_result_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(task_id) DO UPDATE SET
+                    status = excluded.status,
+                    approve = excluded.approve,
+                    summary_text = excluded.summary_text,
+                    reject_reason = excluded.reject_reason,
+                    session_id = excluded.session_id,
+                    markdown_summary = excluded.markdown_summary,
+                    warnings_json = excluded.warnings_json,
+                    raw_result_json = excluded.raw_result_json,
+                    created_at = excluded.created_at
+                """,
+                (
+                    task_id,
+                    review_result.status,
+                    1 if review_result.approve else 0,
+                    review_result.summary_text,
+                    review_result.reject_reason,
+                    review_result.session_id,
+                    review_result.markdown_summary,
+                    warnings_json,
+                    raw_result_json,
+                    now,
+                ),
+            )
+
+            conn.execute("DELETE FROM review_finding WHERE task_id = ?", (task_id,))
+            for idx, c in enumerate(review_result.comments or [], start=1):
+                conn.execute(
+                    """
+                    INSERT INTO review_finding
+                    (task_id, position, path, start_line, end_line, severity, category,
+                     content, existing_code, suggestion_code, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        task_id,
+                        idx,
+                        c.get("path"),
+                        c.get("start_line"),
+                        c.get("end_line"),
+                        c.get("severity"),
+                        c.get("category"),
+                        c.get("content"),
+                        c.get("existing_code"),
+                        c.get("suggestion_code"),
+                        now,
+                    ),
+                )
 
     def get(self, task_id: str) -> Optional[ReviewTask]:
         with _db() as conn:

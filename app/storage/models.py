@@ -13,6 +13,7 @@ class ReviewTask:
     commit_sha: str
     project_url: str
     status: str
+    source: str = "webhook"
     approve: Optional[bool] = None
     summary: Optional[str] = None
     stats_json: Optional[str] = None

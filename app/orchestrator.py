@@ -24,14 +24,25 @@ def do_review_sync(req: ReviewRequest) -> ReviewResponse:
     log.info(f"开始审核 MR !{req.mr_iid}: {req.source_branch} -> {req.target_branch} (project {req.project_id})")
     log.info(f"输入 project_url: {req.project_url}")
 
+    task_id, _ = storage.create_task(
+        project_id=req.project_id,
+        mr_iid=req.mr_iid,
+        source_branch=req.source_branch,
+        target_branch=req.target_branch,
+        commit_sha=req.commit_sha or "",
+        project_url=req.project_url,
+        source="api",
+    )
+    storage.update_status(task_id, "running")
+
     clone_url = req.project_url
     gl = get_gitlab()
     if gl:
         log.info(f"GitLab 客户端已初始化，进行 URL 转换")
         clone_url = gl.clone_url(req.project_url)
-        log.info(f"转换后 clone_url: {clone_url}")
+        log.info("已完成 clone URL 转换")
     else:
-        log.warning(f"GitLab 客户端未初始化，将使用原始 URL: {clone_url}")
+        log.warning("GitLab 客户端未初始化，将使用原始项目 URL")
         log.warning(f"GITLAB_URL={config.GITLAB_URL}, GITLAB_TOKEN={'已配置' if config.GITLAB_TOKEN else '未配置'}")
 
     wt_path = None
@@ -50,6 +61,15 @@ def do_review_sync(req: ReviewRequest) -> ReviewResponse:
 
         result_json = reviewer.run_ocr(wt_path, target_sha, to_sha)
         rr = reviewer.decide(result_json)
+        storage.save_review_artifacts(task_id, result_json, rr)
+        storage.update_status(
+            task_id,
+            "done",
+            approve=1 if rr.approve else 0,
+            summary=rr.summary_text,
+            stats_json=json.dumps(rr.stats),
+            gitlab_posted=0,
+        )
         log.info(f"MR !{req.mr_iid} 完成: approve={rr.approve}, {rr.summary_text}")
 
         if gl:
@@ -68,6 +88,9 @@ def do_review_sync(req: ReviewRequest) -> ReviewResponse:
             warnings=rr.warnings,
             session_id=rr.session_id,
         )
+    except Exception as e:
+        storage.update_status(task_id, "failed", error=str(e))
+        raise
     finally:
         if wt_path:
             repo_cache.cleanup_worktree(wt_path)
@@ -150,6 +173,7 @@ def do_review_async(task_id: str):
         # 2. 跑 ocr
         result_json = reviewer.run_ocr(wt_path, target_sha, to_sha)
         rr = reviewer.decide(result_json)
+        storage.save_review_artifacts(task_id, result_json, rr)
         log.info(f"Task {task_id} MR !{task.mr_iid} done: approve={rr.approve}, {rr.summary_text}")
 
         # 3. 构建结论 body

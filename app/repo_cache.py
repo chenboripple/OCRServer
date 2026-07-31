@@ -12,10 +12,25 @@ import shutil
 import subprocess
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from . import config
 
 log = logging.getLogger("repo-cache")
+
+
+def _redact_url(text: str) -> str:
+    """Mask URL credentials when writing logs/errors."""
+    if not text:
+        return text
+    try:
+        parsed = urlsplit(text)
+        if parsed.scheme and parsed.netloc and "@" in parsed.netloc:
+            _, host = parsed.netloc.rsplit("@", 1)
+            return urlunsplit((parsed.scheme, f"***:***@{host}", parsed.path, parsed.query, parsed.fragment))
+    except Exception:
+        return "***"
+    return text
 
 
 class RepoError(Exception):
@@ -39,7 +54,8 @@ class RepoCache:
 
     def _run_git(self, args: list[str], cwd: Path | None = None, env: dict | None = None) -> str:
         """跑 git 命令,失败抛 RepoError。"""
-        cmd_str = " ".join(["git"] + args)
+        safe_args = [_redact_url(a) for a in args]
+        cmd_str = " ".join(["git"] + safe_args)
         log.debug(f"执行 git 命令: {cmd_str} (cwd={cwd}, timeout={self.git_timeout}s)")
         try:
             result = subprocess.run(
@@ -77,7 +93,7 @@ class RepoCache:
         """确保 bare repo 存在;不存在则 clone --bare,存在则跳过(由 fetch 更新)。"""
         bare = self._bare_path(project_id)
         if not bare.exists():
-            log.info(f"首次 clone bare repo: project={project_id}, url={clone_url}")
+            log.info(f"首次 clone bare repo: project={project_id}, url={_redact_url(clone_url)}")
             # 首次:clone bare
             self._run_git(["clone", "--bare", clone_url, str(bare)])
             log.info(f"clone 完成: {bare}")

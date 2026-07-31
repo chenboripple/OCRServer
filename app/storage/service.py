@@ -24,6 +24,9 @@ class ReviewService:
     def update_status(self, task_id: str, status: str, **fields) -> None:
         return self.task_repo.update_status(task_id, status, **fields)
 
+    def save_review_artifacts(self, task_id: str, result_json: dict, review_result) -> None:
+        return self.task_repo.save_review_artifacts(task_id, result_json, review_result)
+
     def queued_tasks(self) -> List[ReviewTask]:
         return self.task_repo.queued()
 

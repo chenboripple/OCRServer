@@ -6,6 +6,7 @@
 """
 from .connection import _db, init_db
 from .models import ReviewTask
+from .repositories.console_repository import ConsoleRepository
 from .repositories.task_repository import TaskRepository
 from .repositories.webhook_repository import WebhookEventRepository
 from .service import ReviewService
@@ -13,6 +14,7 @@ from .service import ReviewService
 # 单例仓储 + 服务
 task_repo = TaskRepository()
 webhook_repo = WebhookEventRepository()
+console_repo = ConsoleRepository()
 service = ReviewService(task_repo, webhook_repo)
 
 
@@ -27,6 +29,10 @@ def get_task(task_id):
 
 def update_status(task_id, status, **fields):
     return service.update_status(task_id, status, **fields)
+
+
+def save_review_artifacts(task_id, result_json, review_result):
+    return service.save_review_artifacts(task_id, result_json, review_result)
 
 
 def get_queued_tasks():
@@ -48,7 +54,9 @@ def record_webhook_event(*args, **kwargs):
 __all__ = [
     "ReviewTask", "init_db",
     "task_repo", "webhook_repo", "service",
+    "console_repo",
     "create_task", "get_task", "update_status",
+    "save_review_artifacts",
     "get_queued_tasks", "get_unposted_tasks", "get_queued_count",
     "record_webhook_event", "_db",
 ]
