@@ -116,6 +116,10 @@
       min-width: 0;
     }
 
+    .field-span-2 {
+      grid-column: span 2;
+    }
+
     .field label {
       font-size: 12px;
       color: var(--muted);
@@ -246,6 +250,11 @@
       min-height: 420px;
     }
 
+    .split > .card {
+      min-width: 0;
+      overflow: hidden;
+    }
+
     .section-title {
       padding: 12px 14px;
       border-bottom: 1px solid var(--line);
@@ -285,6 +294,7 @@
       display: grid;
       gap: 10px;
       align-content: start;
+      min-width: 0;
     }
 
     .grid-2 {
@@ -299,6 +309,7 @@
       padding: 8px 9px;
       background: #fcfdff;
       min-height: 58px;
+      min-width: 0;
     }
 
     .kv .k {
@@ -325,6 +336,9 @@
       font-size: 12px;
       line-height: 1.45;
       max-height: 220px;
+      max-width: 100%;
+      white-space: pre-wrap;
+      word-break: break-word;
     }
 
     details.raw {
@@ -332,6 +346,9 @@
       border-radius: 10px;
       background: #f9fbff;
       padding: 8px;
+      min-width: 0;
+      max-width: 100%;
+      overflow: hidden;
     }
 
     details.raw > summary {
@@ -347,6 +364,7 @@
       max-height: 620px;
       overflow: auto;
       padding: 12px;
+      min-width: 0;
     }
 
     .finding {
@@ -356,6 +374,7 @@
       padding: 10px;
       display: grid;
       gap: 7px;
+      min-width: 0;
     }
 
     .finding .head {
@@ -381,6 +400,7 @@
       white-space: pre-wrap;
       word-break: break-word;
       max-height: 220px;
+      max-width: 100%;
       overflow: auto;
     }
 
@@ -392,6 +412,43 @@
       align-items: center;
       color: var(--muted);
       font-size: 12px;
+    }
+
+    .inline-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .task-row {
+      cursor: pointer;
+    }
+
+    .task-summary {
+      max-width: 360px;
+    }
+
+    .mt-4 {
+      margin-top: 4px;
+    }
+
+    .btn-sm {
+      padding: 6px 8px;
+      font-size: 12px;
+    }
+
+    .error-text {
+      color: #b82a2a;
+    }
+
+    .raw-pre {
+      margin-top: 8px;
+      max-height: 320px;
+    }
+
+    .copied-tip {
+      padding: 0 14px 12px;
     }
 
     .pager-actions {
@@ -494,6 +551,9 @@
       .toolbar {
         grid-template-columns: 1fr;
       }
+      .field-span-2 {
+        grid-column: span 1;
+      }
       .kpis {
         grid-template-columns: 1fr;
       }
@@ -563,14 +623,14 @@
             <input v-model.trim="filters.mr_iid" placeholder="mr iid" />
           </div>
 
-          <div class="field" style="grid-column: span 2;">
+          <div class="field field-span-2">
             <label>Keyword</label>
             <input v-model.trim="filters.q" placeholder="task id, branch, summary, error, session" />
           </div>
 
           <div class="field">
             <label>Actions</label>
-            <div style="display:flex; gap:8px;">
+            <div class="inline-actions">
               <button @click="reloadAll">Search</button>
               <button class="ghost" @click="resetFilters">Reset</button>
             </div>
@@ -625,7 +685,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="t in taskData.items" :key="t.task_id" @click="selectTask(t.task_id)" style="cursor:pointer;">
+              <tr v-for="t in taskData.items" :key="t.task_id" @click="selectTask(t.task_id)" class="task-row">
                 <td class="col-project-name">
                   <div>{{ projectName(t) }}</div>
                   <div class="muted">{{ t.project_id }}</div>
@@ -656,9 +716,9 @@
                   <div>files: {{ t.stats.files_reviewed || '-' }}</div>
                   <div>tokens: {{ t.stats.total_tokens || '-' }}</div>
                 </td>
-                <td class="col-summary" style="max-width:360px;">
+                <td class="col-summary task-summary">
                   <div>{{ t.summary || '-' }}</div>
-                  <div v-if="t.error" class="muted" style="margin-top:4px;">{{ t.error }}</div>
+                  <div v-if="t.error" class="muted mt-4">{{ t.error }}</div>
                 </td>
               </tr>
               <tr v-if="taskData.items.length === 0">
@@ -685,8 +745,7 @@
               <span class="muted task-detail-id">{{ selectedTaskId || 'none selected' }}</span>
               <button
                 v-if="taskDetail && taskDetail.session_id"
-                class="ghost"
-                style="padding:6px 8px; font-size:12px;"
+                class="ghost btn-sm"
                 @click="copySessionId"
               >
                 Copy session_id
@@ -716,7 +775,7 @@
 
             <div class="kv" v-if="taskDetail.error">
               <div class="k">Error</div>
-              <div class="v" style="color:#b82a2a;">{{ taskDetail.error }}</div>
+              <div class="v error-text">{{ taskDetail.error }}</div>
             </div>
 
             <div class="kv">
@@ -731,12 +790,12 @@
 
             <details class="raw" v-if="taskDetail.raw_result">
               <summary>Raw OCR Result (JSON)</summary>
-              <pre style="margin-top:8px; max-height: 320px;">{{ pretty(taskDetail.raw_result) }}</pre>
+              <pre class="raw-pre">{{ pretty(taskDetail.raw_result) }}</pre>
             </details>
           </div>
           <div class="detail muted" v-else>Select one task from the list.</div>
           <div v-if="detailError" class="err">{{ detailError }}</div>
-          <div v-if="copiedTip" class="muted" style="padding: 0 14px 12px;">{{ copiedTip }}</div>
+          <div v-if="copiedTip" class="muted copied-tip">{{ copiedTip }}</div>
         </article>
 
         <article class="card">
@@ -1120,7 +1179,13 @@
             const parts = cleaned.split("/").filter(Boolean);
             segment = parts.length ? parts[parts.length - 1] : "";
           }
-          const name = decodeURIComponent(segment).replace(/\.git$/i, "");
+          let name = segment;
+          try {
+            name = decodeURIComponent(segment);
+          } catch (_) {
+            name = segment;
+          }
+          name = name.replace(/\.git$/i, "");
           return name || String(task.project_id || "-");
         },
         compactTime(s) {
