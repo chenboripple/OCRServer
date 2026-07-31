@@ -54,6 +54,11 @@
       background: rgba(247, 250, 255, 0.85);
     }
 
+    .top-meta {
+      text-align: right;
+      white-space: nowrap;
+    }
+
     .brand {
       display: flex;
       align-items: center;
@@ -189,7 +194,8 @@
     table {
       width: 100%;
       border-collapse: collapse;
-      min-width: 1050px;
+      table-layout: fixed;
+      min-width: 0;
       font-size: 13px;
     }
 
@@ -199,6 +205,8 @@
       border-bottom: 1px solid var(--line);
       text-align: left;
       vertical-align: top;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
 
     th {
@@ -246,6 +254,30 @@
       align-items: center;
       gap: 10px;
       font-weight: 700;
+    }
+
+    .section-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .task-detail-head {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      min-width: 0;
+    }
+
+    .task-detail-id {
+      max-width: min(45vw, 420px);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .detail {
@@ -362,6 +394,31 @@
       font-size: 12px;
     }
 
+    .pager-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .toolbar-findings {
+      grid-template-columns: repeat(4, minmax(120px, 1fr));
+      padding-top: 10px;
+    }
+
+    .col-project-name { width: 180px; }
+    .col-mr { width: 230px; }
+    .col-time { width: 92px; }
+    .col-elapsed { width: 84px; }
+    .col-task { width: 120px; }
+    .col-source { width: 78px; }
+    .col-status { width: 88px; }
+    .col-approve { width: 76px; }
+    .col-findings { width: 150px; }
+    .col-stats { width: 150px; }
+    .col-summary { width: auto; }
+
     .err {
       color: #b82a2a;
       padding: 0 12px 12px;
@@ -372,14 +429,81 @@
       .toolbar { grid-template-columns: repeat(4, minmax(120px, 1fr)); }
       .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .split { grid-template-columns: 1fr; }
+      .toolbar-findings { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+      .col-findings,
+      .col-stats,
+      .col-source {
+        display: none;
+      }
     }
 
     @media (max-width: 700px) {
-      .top { padding: 14px; }
+      .top {
+        padding: 14px;
+        position: static;
+        flex-wrap: wrap;
+        align-items: flex-start;
+      }
+      .top-meta {
+        width: 100%;
+        text-align: left;
+        white-space: normal;
+      }
       .layout { padding: 12px; }
       .toolbar { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
       .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .grid-2 { grid-template-columns: 1fr; }
+      .section-title {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .section-actions,
+      .task-detail-head,
+      .pager-actions {
+        width: 100%;
+        justify-content: flex-start;
+      }
+      .task-detail-id {
+        max-width: 100%;
+      }
+      .toolbar-findings { grid-template-columns: 1fr; }
+      .finding {
+        padding: 9px;
+      }
+      .findings-list {
+        max-height: none;
+      }
+      .pager {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .col-started,
+      .col-finished,
+      .col-task {
+        display: none;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .brand {
+        gap: 8px;
+      }
+      h1 {
+        font-size: 18px;
+      }
+      .toolbar {
+        grid-template-columns: 1fr;
+      }
+      .kpis {
+        grid-template-columns: 1fr;
+      }
+      .col-project-name {
+        width: 170px;
+      }
+      pre,
+      .code {
+        font-size: 11px;
+      }
     }
   </style>
 </head>
@@ -393,7 +517,7 @@
           <div class="muted">Vue3 read-only portal for requests and analysis results</div>
         </div>
       </div>
-      <div class="muted">Last refresh: {{ formatTime(lastRefreshAt) }}</div>
+      <div class="muted top-meta">Last refresh: {{ formatTime(lastRefreshAt) }}</div>
     </header>
 
     <main class="layout">
@@ -457,7 +581,7 @@
       <section class="card">
         <div class="section-title">
           <span>Dashboard</span>
-          <div style="display:flex; gap:8px; align-items:center;">
+          <div class="section-actions">
             <select v-model.number="dashboardDays" @change="loadDashboard">
               <option :value="7">7 days</option>
               <option :value="14">14 days</option>
@@ -485,62 +609,67 @@
           <table>
             <thead>
               <tr>
-                <th>Dispatched</th>
-                <th>Started</th>
-                <th>Finished</th>
-                <th>Elapsed(s)</th>
-                <th>Task</th>
-                <th>Project/MR</th>
-                <th>Source</th>
-                <th>Status</th>
-                <th>Approve</th>
-                <th>Findings</th>
-                <th>Stats</th>
-                <th>Summary/Error</th>
+                <th class="col-project-name">Project</th>
+                <th class="col-mr">MR</th>
+                <th class="col-status">Status</th>
+                <th class="col-approve">Approve</th>
+                <th class="col-time">Dispatched</th>
+                <th class="col-time col-started">Started</th>
+                <th class="col-time col-finished">Finished</th>
+                <th class="col-elapsed">Elapsed(s)</th>
+                <th class="col-task">Task</th>
+                <th class="col-source">Source</th>
+                <th class="col-findings">Findings</th>
+                <th class="col-stats">Stats</th>
+                <th class="col-summary">Summary/Error</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="t in taskData.items" :key="t.task_id" @click="selectTask(t.task_id)" style="cursor:pointer;">
-                <td>{{ compactTime(t.created_at) }}</td>
-                <td>{{ compactTime(t.started_at) }}</td>
-                <td>{{ compactTime(t.finished_at) }}</td>
-                <td>{{ elapsedSeconds(t.started_at, t.finished_at) }}</td>
-                <td><span class="muted">{{ short(t.task_id) }}</span></td>
-                <td>
-                  <div>{{ t.project_id }} / !{{ t.mr_iid }}</div>
+                <td class="col-project-name">
+                  <div>{{ projectName(t) }}</div>
+                  <div class="muted">{{ t.project_id }}</div>
+                </td>
+                <td class="col-mr">
+                  <div>!{{ t.mr_iid }}</div>
                   <div class="muted">{{ t.source_branch }} -> {{ t.target_branch }}</div>
                 </td>
-                <td>{{ t.source || '-' }}</td>
-                <td><span class="badge" :class="'s-' + t.status">{{ t.status }}</span></td>
-                <td>
+                <td class="col-status"><span class="badge" :class="'s-' + t.status">{{ t.status }}</span></td>
+                <td class="col-approve">
                   <span v-if="t.approve === true" class="badge s-done">pass</span>
                   <span v-else-if="t.approve === false" class="badge s-failed">reject</span>
                   <span v-else class="muted">-</span>
                 </td>
-                <td>
+                <td class="col-time">{{ compactTime(t.created_at) }}</td>
+                <td class="col-time col-started">{{ compactTime(t.started_at) }}</td>
+                <td class="col-time col-finished">{{ compactTime(t.finished_at) }}</td>
+                <td class="col-elapsed">{{ elapsedSeconds(t.started_at, t.finished_at) }}</td>
+                <td class="col-task"><span class="muted">{{ short(t.task_id) }}</span></td>
+                <td class="col-source">{{ t.source || '-' }}</td>
+                <td class="col-findings">
                   <span class="sev-critical">C {{ t.finding_counts.critical }}</span>
                   <span class="sev-high"> H {{ t.finding_counts.high }}</span>
                   <span class="sev-medium"> M {{ t.finding_counts.medium }}</span>
                   <span class="sev-low"> L {{ t.finding_counts.low }}</span>
                 </td>
-                <td>
+                <td class="col-stats">
                   <div>files: {{ t.stats.files_reviewed || '-' }}</div>
                   <div>tokens: {{ t.stats.total_tokens || '-' }}</div>
                 </td>
-                <td style="max-width:360px;">
+                <td class="col-summary" style="max-width:360px;">
                   <div>{{ t.summary || '-' }}</div>
                   <div v-if="t.error" class="muted" style="margin-top:4px;">{{ t.error }}</div>
                 </td>
               </tr>
               <tr v-if="taskData.items.length === 0">
-                <td colspan="12" class="muted">No tasks.</td>
+                <td colspan="13" class="muted">No tasks.</td>
               </tr>
             </tbody>
           </table>
         </div>
         <div class="pager">
           <div>Page {{ taskPage }} / {{ taskPages }}</div>
-          <div style="display:flex; gap:8px; align-items:center;">
+          <div class="pager-actions">
             <button class="ghost" :disabled="taskPage <= 1" @click="changeTaskPage(taskPage - 1)">Prev</button>
             <button class="ghost" :disabled="taskPage >= taskPages" @click="changeTaskPage(taskPage + 1)">Next</button>
           </div>
@@ -552,8 +681,8 @@
         <article class="card">
           <div class="section-title">
             <span>Task Detail</span>
-            <div style="display:flex; gap:8px; align-items:center;">
-              <span class="muted">{{ selectedTaskId || 'none selected' }}</span>
+            <div class="task-detail-head">
+              <span class="muted task-detail-id">{{ selectedTaskId || 'none selected' }}</span>
               <button
                 v-if="taskDetail && taskDetail.session_id"
                 class="ghost"
@@ -616,7 +745,7 @@
             <span class="muted">{{ findingData.total || 0 }} total</span>
           </div>
 
-          <div class="toolbar" style="grid-template-columns: repeat(4, minmax(120px, 1fr)); padding-top: 10px;">
+          <div class="toolbar toolbar-findings">
             <div class="field">
               <label>Severity</label>
               <select v-model="findingFilters.severity" @change="loadFindings(1)">
@@ -664,7 +793,7 @@
 
           <div class="pager">
             <div>Page {{ findingPage }} / {{ findingPages }}</div>
-            <div style="display:flex; gap:8px; align-items:center;">
+            <div class="pager-actions">
               <button class="ghost" :disabled="findingPage <= 1" @click="loadFindings(findingPage - 1)">Prev</button>
               <button class="ghost" :disabled="findingPage >= findingPages" @click="loadFindings(findingPage + 1)">Next</button>
             </div>
@@ -968,6 +1097,31 @@
             return s;
           }
           return `${s.slice(0, 8)}...`;
+        },
+        projectName(task) {
+          if (!task) {
+            return "-";
+          }
+          const direct = String(task.project_name || "").trim();
+          if (direct) {
+            return direct;
+          }
+          const fromUrl = String(task.project_url || "").trim();
+          if (!fromUrl) {
+            return String(task.project_id || "-");
+          }
+          let segment = "";
+          try {
+            const pathname = new URL(fromUrl).pathname || "";
+            const parts = pathname.split("/").filter(Boolean);
+            segment = parts.length ? parts[parts.length - 1] : "";
+          } catch (_) {
+            const cleaned = fromUrl.split("?")[0].split("#")[0];
+            const parts = cleaned.split("/").filter(Boolean);
+            segment = parts.length ? parts[parts.length - 1] : "";
+          }
+          const name = decodeURIComponent(segment).replace(/\.git$/i, "");
+          return name || String(task.project_id || "-");
         },
         compactTime(s) {
           if (!s) {
