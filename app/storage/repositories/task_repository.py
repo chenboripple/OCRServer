@@ -27,6 +27,8 @@ def _row_to_task(row) -> ReviewTask:
         gitlab_posted=row["gitlab_posted"],
         pending_discussion_id=row["pending_discussion_id"],
         pending_note_id=row["pending_note_id"],
+        repost_attempts=row["repost_attempts"] or 0,
+        repost_last_at=row["repost_last_at"],
         created_at=row["created_at"],
         started_at=row["started_at"],
         finished_at=row["finished_at"],
@@ -185,13 +187,39 @@ class TaskRepository:
             ).fetchall()
             return [_row_to_task(row) for row in rows]
 
-    def unposted(self) -> List[ReviewTask]:
-        """gitlab_posted=0 的终态任务,补发轮询用。"""
+    def unposted(self, max_attempts: int, retry_interval_minutes: int) -> List[ReviewTask]:
+        """gitlab_posted=0 的终态任务,补发轮询用。
+
+        仅返回未超重试上限、且距上次尝试超过重试间隔的任务。
+        """
+        cutoff = (
+            datetime.datetime.now() - datetime.timedelta(minutes=retry_interval_minutes)
+        ).isoformat()
         with _db() as conn:
             rows = conn.execute(
-                "SELECT * FROM review_task WHERE status IN ('done', 'failed') AND gitlab_posted = 0",
+                """
+                SELECT * FROM review_task
+                WHERE status IN ('done', 'failed') AND gitlab_posted = 0
+                  AND COALESCE(repost_attempts, 0) < ?
+                  AND (repost_last_at IS NULL OR repost_last_at < ?)
+                """,
+                (max_attempts, cutoff),
             ).fetchall()
             return [_row_to_task(row) for row in rows]
+
+    def record_repost_attempt(self, task_id: str) -> None:
+        """记录一次补发尝试(次数 +1,刷新最近尝试时间)。"""
+        now = datetime.datetime.now().isoformat()
+        with _db() as conn:
+            conn.execute(
+                """
+                UPDATE review_task
+                SET repost_attempts = COALESCE(repost_attempts, 0) + 1,
+                    repost_last_at = ?
+                WHERE task_id = ?
+                """,
+                (now, task_id),
+            )
 
     def queued_count(self) -> int:
         """当前 queued 任务数,背压判断用。"""

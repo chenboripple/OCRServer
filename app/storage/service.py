@@ -4,6 +4,7 @@
 """
 from typing import List, Optional
 
+from .. import config
 from .models import ReviewTask
 from .repositories.task_repository import TaskRepository
 from .repositories.webhook_repository import WebhookEventRepository
@@ -30,8 +31,20 @@ class ReviewService:
     def queued_tasks(self) -> List[ReviewTask]:
         return self.task_repo.queued()
 
-    def unposted_tasks(self) -> List[ReviewTask]:
-        return self.task_repo.unposted()
+    def unposted_tasks(
+        self,
+        max_attempts: Optional[int] = None,
+        retry_interval_minutes: Optional[int] = None,
+    ) -> List[ReviewTask]:
+        return self.task_repo.unposted(
+            max_attempts if max_attempts is not None else config.REPOST_MAX_ATTEMPTS,
+            retry_interval_minutes
+            if retry_interval_minutes is not None
+            else config.REPOST_INTERVAL_MIN,
+        )
+
+    def record_repost_attempt(self, task_id: str) -> None:
+        return self.task_repo.record_repost_attempt(task_id)
 
     def queued_count(self) -> int:
         return self.task_repo.queued_count()

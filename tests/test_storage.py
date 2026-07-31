@@ -72,6 +72,42 @@ def test_queued_and_unposted_lists(temp_storage):
     assert all(t.task_id != tid for t in storage.get_unposted_tasks())
 
 
+def _make_done(sha="sha1"):
+    tid, _ = _make(commit_sha=sha)
+    storage.update_status(tid, "done", summary="ok")
+    return tid
+
+
+def test_unposted_retry_interval(temp_storage):
+    """补发失败后在重试间隔内不再捞出,间隔过后重新出现。"""
+    import datetime
+
+    tid = _make_done()
+    assert any(t.task_id == tid for t in storage.get_unposted_tasks(max_attempts=3, retry_interval_minutes=10))
+
+    storage.record_repost_attempt(tid)
+    # 刚失败,10 分钟间隔内不再捞出
+    assert all(t.task_id != tid for t in storage.get_unposted_tasks(max_attempts=3, retry_interval_minutes=10))
+
+    # 把上次尝试时间改到 11 分钟前 -> 重新可捞出
+    old = (datetime.datetime.now() - datetime.timedelta(minutes=11)).isoformat()
+    with storage._db() as conn:
+        conn.execute("UPDATE review_task SET repost_last_at = ? WHERE task_id = ?", (old, tid))
+    assert any(t.task_id == tid for t in storage.get_unposted_tasks(max_attempts=3, retry_interval_minutes=10))
+
+
+def test_unposted_max_attempts_exceeded(temp_storage):
+    """重试次数达到上限后彻底放弃,不再捞出。"""
+    tid = _make_done()
+    for _ in range(3):
+        storage.record_repost_attempt(tid)
+    # 即便上次尝试时间很早,次数达上限也不再捞出
+    with storage._db() as conn:
+        conn.execute("UPDATE review_task SET repost_last_at = '2020-01-01' WHERE task_id = ?", (tid,))
+    assert all(t.task_id != tid for t in storage.get_unposted_tasks(max_attempts=3, retry_interval_minutes=10))
+    assert storage.get_task(tid).repost_attempts == 3
+
+
 def test_init_db_backfills_legacy_missing_columns(tmp_path, monkeypatch):
     from app import config
 

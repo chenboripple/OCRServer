@@ -22,6 +22,11 @@ def _db():
     """线程安全的 SQLite 连接上下文管理器,自动 commit/rollback。"""
     conn = sqlite3.connect(str(config.STORAGE_PATH), check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.execute(f"PRAGMA busy_timeout={max(1000, config.SQLITE_BUSY_TIMEOUT_MS)}")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    if config.SQLITE_WAL_ENABLED:
+        conn.execute("PRAGMA journal_mode=WAL")
     try:
         yield conn
         conn.commit()
@@ -53,6 +58,8 @@ def init_db():
                 gitlab_posted  INTEGER DEFAULT 0,
                 pending_discussion_id TEXT,
                 pending_note_id       TEXT,
+                repost_attempts INTEGER DEFAULT 0,
+                repost_last_at  TEXT,
                 created_at     TEXT NOT NULL,
                 started_at     TEXT,
                 finished_at    TEXT,
@@ -76,6 +83,8 @@ def init_db():
             "gitlab_posted": "gitlab_posted INTEGER DEFAULT 0",
             "pending_discussion_id": "pending_discussion_id TEXT",
             "pending_note_id": "pending_note_id TEXT",
+            "repost_attempts": "repost_attempts INTEGER DEFAULT 0",
+            "repost_last_at": "repost_last_at TEXT",
             "created_at": "created_at TEXT",
             "started_at": "started_at TEXT",
             "finished_at": "finished_at TEXT",

@@ -56,3 +56,44 @@ def test_fallback_when_project_not_in_feishu(monkeypatch):
     assert should_trigger_review("master", "普通标题", "unknown-project") is None
     assert should_trigger_review("feature/demo", "OCR: 新功能", "unknown-project") is None
     assert _skip(should_trigger_review("feature/demo", "普通标题", "unknown-project"))
+
+
+class _FakeFeishuClient:
+    """脚本化飞书客户端替身,返回预设的表格行。"""
+
+    rows = []
+
+    def get_sheet_values(self, token, range_):
+        return self.rows
+
+
+def _setup_feishu(monkeypatch, rows):
+    """启用飞书触发规则,注入假客户端,并清掉模块级规则缓存。"""
+    from app import config
+
+    monkeypatch.setattr(config, "FEISHU_TRIGGER_ENABLED", True)
+    monkeypatch.setattr(config, "FEISHU_TRIGGER_SPREADSHEET_TOKEN", "tok")
+    monkeypatch.setattr(config, "FEISHU_APP_ID", "id")
+    monkeypatch.setattr(config, "FEISHU_APP_SECRET", "secret")
+    _FakeFeishuClient.rows = rows
+    monkeypatch.setattr(trigger_check, "FeishuClient", _FakeFeishuClient)
+    monkeypatch.setattr(trigger_check, "_trigger_rules_cache", None)
+    monkeypatch.setattr(trigger_check, "_trigger_rules_cache_expires_at", None)
+
+
+def test_feishu_row_without_branches_falls_back(monkeypatch):
+    # 飞书里只写项目名、不写分支 -> 不注册规则,该项目走兜底判断
+    _setup_feishu(monkeypatch, [["ocr-server"], ["proj-b", ""]])
+
+    # 兜底规则照常生效:必需分支触发 / 标题前缀触发 / 都不命中则跳过
+    assert should_trigger_review("master", "普通标题", "ocr-server") is None
+    assert should_trigger_review("feature/x", "OCR: 修复", "proj-b") is None
+    assert _skip(should_trigger_review("feature/x", "普通标题", "ocr-server"))
+
+
+def test_feishu_row_with_branches_registered(monkeypatch):
+    # 正常行(项目名 + 分支)仍按飞书规则判断
+    _setup_feishu(monkeypatch, [["ocr-server", "outer-master, hotfix"]])
+
+    assert should_trigger_review("outer-master", "普通标题", "ocr-server") is None
+    assert _skip(should_trigger_review("master", "OCR: 强制触发", "ocr-server"))

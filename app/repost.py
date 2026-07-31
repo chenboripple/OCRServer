@@ -17,7 +17,11 @@ NOTE_BODY_LIMIT = 40000
 
 
 async def repost_worker():
-    """低频率后台轮询,补发 gitlab_posted=0 的终态任务。"""
+    """低频率后台轮询,补发 gitlab_posted=0 的终态任务。
+
+    失败任务按 REPOST_INTERVAL_MIN 间隔重试,达到 REPOST_MAX_ATTEMPTS 次后放弃
+    (由 storage.get_unposted_tasks 过滤,不再捞出)。
+    """
     while True:
         await asyncio.sleep(30)
         try:
@@ -26,18 +30,50 @@ async def repost_worker():
                 log.info(f"Found {len(unposted)} unposted tasks, attempting repost...")
                 gl = get_gitlab()
                 for task in unposted:
-                    if not gl or not task.pending_discussion_id:
-                        storage.update_status(task.task_id, task.status, gitlab_posted=1)
+                    if not gl:
+                        # 客户端不可用是全局故障,不消耗任务的重试次数
+                        log.warning("GitLab 客户端不可用,task=%s 暂不标记已回写", task.task_id)
                         continue
-                    # 尝试 resolve 并编辑
-                    if task.summary:
-                        gl.update_note(
+
+                    body = task.summary or task.error or f"Task {task.task_id} {task.status}"
+
+                    if task.pending_discussion_id and task.pending_note_id:
+                        updated = gl.update_note(
                             task.project_id, task.mr_iid,
                             task.pending_discussion_id, task.pending_note_id,
-                            task.summary,
+                            body,
                         )
-                        gl.resolve_discussion(task.project_id, task.mr_iid, task.pending_discussion_id)
+                        resolved = False
+                        if updated:
+                            resolved = gl.resolve_discussion(
+                                task.project_id, task.mr_iid, task.pending_discussion_id
+                            )
+                        if updated and resolved:
+                            storage.update_status(task.task_id, task.status, gitlab_posted=1)
+                        else:
+                            storage.record_repost_attempt(task.task_id)
+                            log.warning(
+                                "repost 未完成(task=%s,第 %d/%d 次): update=%s resolve=%s",
+                                task.task_id,
+                                task.repost_attempts + 1,
+                                config.REPOST_MAX_ATTEMPTS,
+                                updated,
+                                resolved,
+                            )
+                        continue
+
+                    # 没有 pending discussion 时退化为普通 note,成功才标记
+                    noted = gl.post_note(task.project_id, task.mr_iid, body)
+                    if noted:
                         storage.update_status(task.task_id, task.status, gitlab_posted=1)
+                    else:
+                        storage.record_repost_attempt(task.task_id)
+                        log.warning(
+                            "repost note 失败(task=%s,第 %d/%d 次)",
+                            task.task_id,
+                            task.repost_attempts + 1,
+                            config.REPOST_MAX_ATTEMPTS,
+                        )
         except Exception as e:
             log.warning(f"Repost worker error: {e}")
 

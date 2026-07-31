@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from . import config
 from . import orchestrator
 from . import repost
+from . import trigger_check
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,6 +46,7 @@ app.include_router(console.router)
 async def startup_event():
     """启动:恢复任务 + 清理孤儿 worktree + 启动补发轮询。"""
     orchestrator.startup_recovery()
+    trigger_check.warmup_trigger_rules_cache()
     asyncio.create_task(repost.repost_worker())
 
 

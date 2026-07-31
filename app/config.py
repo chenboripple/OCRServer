@@ -80,6 +80,14 @@ BLOCKING_SEVERITIES = _parse_blocking_severities(_env("BLOCKING_SEVERITIES", "cr
 # ── Webhook ───────────────────────────────────────────────
 WEBHOOK_SECRET = _env("WEBHOOK_SECRET", "")
 STORAGE_PATH = Path(_env("STORAGE_PATH", "/var/ocr/ocr.db"))
+# SQLite 并发参数
+SQLITE_BUSY_TIMEOUT_MS = _env_int("SQLITE_BUSY_TIMEOUT_MS", 8000)
+SQLITE_WAL_ENABLED = _env_bool("SQLITE_WAL_ENABLED", True)
+
+# ── 回写补偿(repost) ─────────────────────────────────────
+# 终态任务回写失败后的补发策略:按间隔重试,超过次数后放弃
+REPOST_MAX_ATTEMPTS = _env_int("REPOST_MAX_ATTEMPTS", 3)
+REPOST_INTERVAL_MIN = _env_int("REPOST_INTERVAL_MIN", 10)
 
 # ── Feishu(飞书电子表格集成) ─────────────────────────────────
 # 每次 review 前从飞书电子表格读取自定义审核规则,更新到 ocr 配置文件中
@@ -97,6 +105,8 @@ FEISHU_TRIGGER_SPREADSHEET_TOKEN = _env(
     FEISHU_SPREADSHEET_TOKEN,
 )
 FEISHU_TRIGGER_SHEET_RANGE = _env("FEISHU_TRIGGER_SHEET_RANGE", "Sheet1!A:B")
+# 飞书触发规则缓存时长(分钟),避免每次 webhook 都请求飞书
+FEISHU_TRIGGER_CACHE_TTL_MIN = _env_int("FEISHU_TRIGGER_CACHE_TTL_MIN", 60)
 
 # ── ocr 配置文件路径 ───────────────────────────────────────
 # ocr 的 ~/.opencodereview/config.json,程序启动时/每次 review 前可写入自定义规则

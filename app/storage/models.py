@@ -21,6 +21,8 @@ class ReviewTask:
     gitlab_posted: int = 0
     pending_discussion_id: Optional[str] = None
     pending_note_id: Optional[str] = None
+    repost_attempts: int = 0
+    repost_last_at: Optional[str] = None
     created_at: Optional[str] = None
     started_at: Optional[str] = None
     finished_at: Optional[str] = None

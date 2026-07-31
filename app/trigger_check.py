@@ -9,11 +9,17 @@
 """
 import logging
 import re
+import threading
+from datetime import datetime, timedelta
 
 from . import config
 from .feishu_client import FeishuClient, FeishuError
 
 log = logging.getLogger("ocr-server.trigger-check")
+
+_trigger_rules_cache_lock = threading.RLock()
+_trigger_rules_cache: dict[str, set[str]] | None = None
+_trigger_rules_cache_expires_at: datetime | None = None
 
 
 def _normalize_project_name(project_name: str) -> str:
@@ -46,6 +52,91 @@ def _parse_branch_list(value: str) -> set[str]:
     return {p.strip() for p in parts if p.strip()}
 
 
+def _load_trigger_rules_from_feishu() -> dict[str, set[str]] | None:
+    """从飞书加载全量项目触发规则(项目名 -> 目标分支集合)。"""
+    if not config.FEISHU_TRIGGER_ENABLED:
+        return None
+    if not config.FEISHU_TRIGGER_SPREADSHEET_TOKEN:
+        log.warning("FEISHU_TRIGGER_SPREADSHEET_TOKEN 未配置,跳过飞书触发规则")
+        return None
+    if not config.FEISHU_APP_ID or not config.FEISHU_APP_SECRET:
+        log.warning("飞书触发规则启用但 FEISHU_APP_ID / FEISHU_APP_SECRET 未配置")
+        return None
+
+    try:
+        client = FeishuClient()
+    except FeishuError as e:
+        log.warning("飞书触发规则客户端初始化失败(将回退兜底规则): %s", e)
+        return None
+
+    try:
+        rows = client.get_sheet_values(
+            config.FEISHU_TRIGGER_SPREADSHEET_TOKEN,
+            config.FEISHU_TRIGGER_SHEET_RANGE,
+        )
+    except FeishuError as e:
+        log.warning("读取飞书触发规则失败(将回退兜底规则): %s", e)
+        return None
+    except Exception as e:
+        log.warning("读取飞书触发规则异常(将回退兜底规则): %s", e)
+        return None
+
+    rules: dict[str, set[str]] = {}
+    for row in rows:
+        if not row:
+            continue
+        row_project_name = _normalize_project_name(row[0] if len(row) >= 1 else "")
+        if not row_project_name:
+            continue
+        branches = _parse_branch_list(row[1] if len(row) >= 2 else "")
+        if not branches:
+            # 只写项目名不写分支 → 不注册规则,让该项目走兜底判断
+            continue
+        rules.setdefault(row_project_name, set()).update(branches)
+
+    return rules
+
+
+def _refresh_trigger_rules_cache(force: bool = False) -> dict[str, set[str]] | None:
+    """刷新飞书触发规则缓存;失败时尽量返回旧缓存。"""
+    global _trigger_rules_cache
+    global _trigger_rules_cache_expires_at
+
+    now = datetime.now()
+    with _trigger_rules_cache_lock:
+        if (
+            not force
+            and _trigger_rules_cache is not None
+            and _trigger_rules_cache_expires_at is not None
+            and now < _trigger_rules_cache_expires_at
+        ):
+            return _trigger_rules_cache
+
+    fresh = _load_trigger_rules_from_feishu()
+    ttl_min = max(1, config.FEISHU_TRIGGER_CACHE_TTL_MIN)
+
+    with _trigger_rules_cache_lock:
+        if fresh is not None:
+            _trigger_rules_cache = fresh
+            _trigger_rules_cache_expires_at = now + timedelta(minutes=ttl_min)
+            log.info("飞书触发规则缓存已刷新: projects=%d, ttl=%dmin", len(fresh), ttl_min)
+            return _trigger_rules_cache
+
+        if _trigger_rules_cache is not None:
+            # 读取失败时保留最近一次缓存,避免触发链路被外部依赖放大
+            _trigger_rules_cache_expires_at = now + timedelta(minutes=ttl_min)
+            log.warning("飞书触发规则刷新失败,沿用本地缓存 %d 分钟", ttl_min)
+            return _trigger_rules_cache
+        return None
+
+
+def warmup_trigger_rules_cache() -> None:
+    """服务启动后主动预热触发规则缓存。"""
+    if not config.FEISHU_TRIGGER_ENABLED:
+        return
+    _refresh_trigger_rules_cache(force=True)
+
+
 def _matches_required_branch_in_list(branch: str, required_branches: set[str]) -> bool:
     """判断分支是否命中给定分支集合(支持精确与前缀 release/x 匹配)。"""
     branch = branch.lower()
@@ -70,50 +161,16 @@ def _get_project_required_branches_from_feishu(project_name: str) -> set[str] | 
     if not normalized_name:
         return None
 
-    if not config.FEISHU_TRIGGER_ENABLED:
-        return None
-    if not config.FEISHU_TRIGGER_SPREADSHEET_TOKEN:
-        log.warning("FEISHU_TRIGGER_SPREADSHEET_TOKEN 未配置,跳过飞书触发规则")
+    rules = _refresh_trigger_rules_cache(force=False)
+    if not rules:
         return None
 
-    if not config.FEISHU_APP_ID or not config.FEISHU_APP_SECRET:
-        log.warning("飞书触发规则启用但 FEISHU_APP_ID / FEISHU_APP_SECRET 未配置")
+    branches = rules.get(normalized_name)
+    if branches is None:
         return None
 
-    try:
-        client = FeishuClient()
-    except FeishuError as e:
-        log.warning("飞书触发规则客户端初始化失败(将回退兜底规则): %s", e)
-        return None
-
-    try:
-        rows = client.get_sheet_values(
-            config.FEISHU_TRIGGER_SPREADSHEET_TOKEN,
-            config.FEISHU_TRIGGER_SHEET_RANGE,
-        )
-    except FeishuError as e:
-        log.warning("读取飞书触发规则失败(将回退兜底规则): %s", e)
-        return None
-    except Exception as e:
-        log.warning("读取飞书触发规则异常(将回退兜底规则): %s", e)
-        return None
-
-    for row in rows:
-        if len(row) < 2:
-            continue
-        row_project_name = _normalize_project_name(row[0])
-        if row_project_name != normalized_name:
-            continue
-
-        branches = _parse_branch_list(row[1])
-        if not branches:
-            log.info("飞书触发规则命中项目 '%s',但分支列为空", project_name)
-            return set()
-
-        log.info("飞书触发规则命中项目 '%s': %s", project_name, sorted(branches))
-        return branches
-
-    return None
+    log.info("飞书触发规则命中项目 '%s': %s", project_name, sorted(branches))
+    return branches
 
 
 def should_trigger_review(target_branch: str, mr_title: str, project_name: str = "") -> str | None:

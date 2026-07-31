@@ -39,8 +39,12 @@ def get_queued_tasks():
     return service.queued_tasks()
 
 
-def get_unposted_tasks():
-    return service.unposted_tasks()
+def get_unposted_tasks(max_attempts=None, retry_interval_minutes=None):
+    return service.unposted_tasks(max_attempts, retry_interval_minutes)
+
+
+def record_repost_attempt(task_id):
+    return service.record_repost_attempt(task_id)
 
 
 def get_queued_count():
@@ -58,5 +62,6 @@ __all__ = [
     "create_task", "get_task", "update_status",
     "save_review_artifacts",
     "get_queued_tasks", "get_unposted_tasks", "get_queued_count",
+    "record_repost_attempt",
     "record_webhook_event", "_db",
 ]
