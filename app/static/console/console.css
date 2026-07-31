@@ -221,37 +221,6 @@ button.ghost {
   background: #95abd4;
 }
 
-.table-wrap::before,
-.table-wrap::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 24px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.18s ease;
-  z-index: 3;
-}
-
-.table-wrap::before {
-  left: 0;
-  background: linear-gradient(90deg, rgba(16, 33, 59, 0.14), rgba(16, 33, 59, 0));
-}
-
-.table-wrap::after {
-  right: 0;
-  background: linear-gradient(270deg, rgba(16, 33, 59, 0.14), rgba(16, 33, 59, 0));
-}
-
-.table-wrap.show-left-shadow::before {
-  opacity: 1;
-}
-
-.table-wrap.show-right-shadow::after {
-  opacity: 1;
-}
-
 table {
   width: 100%;
   border-collapse: collapse;
@@ -276,17 +245,24 @@ td {
 
 .tasks-table th,
 .tasks-table td {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  overflow-wrap: normal;
-  word-break: normal;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .tasks-table td > div {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.tasks-table .col-time,
+.tasks-table .col-time > div {
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 th {
@@ -563,7 +539,7 @@ details.raw > summary {
 
 .col-project-name { width: 190px; max-width: 190px; }
 .col-mr { width: 250px; max-width: 250px; }
-.col-time { width: 92px; }
+.col-time { width: 170px; }
 .col-elapsed { width: 84px; }
 .col-task { width: 120px; max-width: 120px; }
 .col-source { width: 88px; max-width: 88px; }

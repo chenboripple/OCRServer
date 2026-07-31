@@ -35,9 +35,6 @@ createApp({
       findingPage: 1,
       findingPageSize: 50,
       findingError: "",
-      taskTableCanScroll: false,
-      taskTableAtLeft: true,
-      taskTableAtRight: true,
       copiedTip: "",
       timer: null
     };
@@ -53,14 +50,12 @@ createApp({
   mounted() {
     this.applyStateFromUrl();
     this.reloadAll();
-    window.addEventListener("resize", this.updateTaskTableScrollState);
     this.timer = window.setInterval(this.autoRefresh, 8000);
   },
   beforeUnmount() {
     if (this.timer) {
       window.clearInterval(this.timer);
     }
-    window.removeEventListener("resize", this.updateTaskTableScrollState);
   },
   methods: {
     apiBase() {
@@ -102,7 +97,6 @@ createApp({
         await this.selectTask(this.taskData.items[0].task_id);
       }
       this.syncStateToUrl();
-      this.$nextTick(() => this.updateTaskTableScrollState());
       this.lastRefreshAt = new Date().toISOString();
     },
     async loadDashboard() {
@@ -142,32 +136,9 @@ createApp({
         if (syncUrl) {
           this.syncStateToUrl();
         }
-        this.$nextTick(() => this.updateTaskTableScrollState());
       } catch (e) {
         this.taskError = `Load tasks failed: ${String(e)}`;
       }
-    },
-    onTaskTableScroll() {
-      this.updateTaskTableScrollState();
-    },
-    updateTaskTableScrollState() {
-      const wrap = this.$refs.taskTableWrap;
-      if (!wrap) {
-        this.taskTableCanScroll = false;
-        this.taskTableAtLeft = true;
-        this.taskTableAtRight = true;
-        return;
-      }
-      const maxScrollLeft = Math.max(0, wrap.scrollWidth - wrap.clientWidth);
-      const canScroll = maxScrollLeft > 1;
-      this.taskTableCanScroll = canScroll;
-      if (!canScroll) {
-        this.taskTableAtLeft = true;
-        this.taskTableAtRight = true;
-        return;
-      }
-      this.taskTableAtLeft = wrap.scrollLeft <= 1;
-      this.taskTableAtRight = wrap.scrollLeft >= maxScrollLeft - 1;
     },
     async changeTaskPage(page) {
       if (page < 1 || page > this.taskPages) {

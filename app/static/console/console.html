@@ -106,15 +106,7 @@
           <span>Tasks</span>
           <span class="muted">{{ taskData.total }} total</span>
         </div>
-        <div
-          class="table-wrap"
-          ref="taskTableWrap"
-          @scroll="onTaskTableScroll"
-          :class="{
-            'show-left-shadow': taskTableCanScroll && !taskTableAtLeft,
-            'show-right-shadow': taskTableCanScroll && !taskTableAtRight
-          }"
-        >
+        <div class="table-wrap">
           <table class="tasks-table">
             <thead>
               <tr>
