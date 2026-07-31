@@ -191,7 +191,8 @@
     }
 
     .table-wrap {
-      overflow: auto;
+      overflow-x: auto;
+      overflow-y: hidden;
       padding: 0 12px 12px;
     }
 
@@ -211,6 +212,25 @@
       vertical-align: top;
       overflow-wrap: anywhere;
       word-break: break-word;
+    }
+
+    .tasks-table {
+      min-width: 1760px;
+    }
+
+    .tasks-table th,
+    .tasks-table td {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      overflow-wrap: normal;
+      word-break: normal;
+    }
+
+    .tasks-table td > div {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     th {
@@ -464,17 +484,17 @@
       padding-top: 10px;
     }
 
-    .col-project-name { width: 180px; }
-    .col-mr { width: 230px; }
+    .col-project-name { width: 190px; max-width: 190px; }
+    .col-mr { width: 250px; max-width: 250px; }
     .col-time { width: 92px; }
     .col-elapsed { width: 84px; }
-    .col-task { width: 120px; }
-    .col-source { width: 78px; }
-    .col-status { width: 88px; }
-    .col-approve { width: 76px; }
-    .col-findings { width: 150px; }
-    .col-stats { width: 150px; }
-    .col-summary { width: auto; }
+    .col-task { width: 120px; max-width: 120px; }
+    .col-source { width: 88px; max-width: 88px; }
+    .col-status { width: 90px; max-width: 90px; }
+    .col-approve { width: 82px; max-width: 82px; }
+    .col-findings { width: 150px; max-width: 150px; }
+    .col-stats { width: 160px; max-width: 160px; }
+    .col-summary { width: 430px; max-width: 430px; }
 
     .err {
       color: #b82a2a;
@@ -487,11 +507,6 @@
       .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .split { grid-template-columns: 1fr; }
       .toolbar-findings { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
-      .col-findings,
-      .col-stats,
-      .col-source {
-        display: none;
-      }
     }
 
     @media (max-width: 700px) {
@@ -533,11 +548,6 @@
       .pager {
         flex-direction: column;
         align-items: flex-start;
-      }
-      .col-started,
-      .col-finished,
-      .col-task {
-        display: none;
       }
     }
 
@@ -666,7 +676,7 @@
           <span class="muted">{{ taskData.total }} total</span>
         </div>
         <div class="table-wrap">
-          <table>
+          <table class="tasks-table">
             <thead>
               <tr>
                 <th class="col-project-name">Project</th>
@@ -716,9 +726,9 @@
                   <div>files: {{ t.stats.files_reviewed || '-' }}</div>
                   <div>tokens: {{ t.stats.total_tokens || '-' }}</div>
                 </td>
-                <td class="col-summary task-summary">
-                  <div>{{ t.summary || '-' }}</div>
-                  <div v-if="t.error" class="muted mt-4">{{ t.error }}</div>
+                <td class="col-summary task-summary" :title="[t.summary, t.error].filter(Boolean).join(' | ')">
+                  <div :title="t.summary || ''">{{ t.summary || '-' }}</div>
+                  <div v-if="t.error" class="muted mt-4" :title="t.error">{{ t.error }}</div>
                 </td>
               </tr>
               <tr v-if="taskData.items.length === 0">
