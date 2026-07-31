@@ -1,0 +1,29 @@
+app/routes/console.py
+  2e74ad12f1c62576 11
+app/static/console/console.css
+  2e74ad12f1c62576 1-660
+app/static/console/console.js
+  2e74ad12f1c62576 1-400
+app/static/console/console.html
+  2e74ad12f1c62576 7-9,137-143,295
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "1a1983dfcfe0e10289f495772fde4c5a73970e7d",
+  "prompts": {
+    "2e74ad12f1c62576": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "dd95ef89-8055-45c1-abe4-83138a3a978c",
+        "model": "copilot/gpt-5.3-codex"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 1449,
+      "total_deletions": 1400,
+      "accepted_lines": 1459,
+      "overriden_lines": 0
+    }
+  }
+}
