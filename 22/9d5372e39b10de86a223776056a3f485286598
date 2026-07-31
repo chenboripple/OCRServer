@@ -1,0 +1,25 @@
+app/static/console/console.css
+  2e74ad12f1c62576 248-252,256-262,264-265,542
+app/static/console/console.html
+  2e74ad12f1c62576 109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "229d5372e39b10de86a223776056a3f485286598",
+  "prompts": {
+    "2e74ad12f1c62576": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "dd95ef89-8055-45c1-abe4-83138a3a978c",
+        "model": "copilot/gpt-5.3-codex"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 16,
+      "total_deletions": 77,
+      "accepted_lines": 1321,
+      "overriden_lines": 0
+    }
+  }
+}
