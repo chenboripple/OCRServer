@@ -765,10 +765,10 @@
           await Promise.all([this.loadDashboard(), this.loadTasks(this.taskPage, true, false)]);
           if (this.selectedTaskId) {
             const exists = this.taskData.items.some((i) => i.task_id === this.selectedTaskId);
-            if (exists) {
-              await this.loadTaskDetail(this.selectedTaskId, true);
-              await this.loadFindings(this.findingPage, true, false);
-            } else if (this.taskData.items.length > 0) {
+            // Keep detail visible even when current list filters exclude this task.
+            await this.loadTaskDetail(this.selectedTaskId, true);
+            await this.loadFindings(this.findingPage, true, false);
+            if (!exists && this.taskData.items.length > 0) {
               await this.selectTask(this.taskData.items[0].task_id);
             }
           } else if (this.taskData.items.length > 0) {

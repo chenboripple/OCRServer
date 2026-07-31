@@ -21,6 +21,8 @@ services:
     # Volume 挂载
     # ============================================
     volumes:
+      # 持久化 SQLite 数据库(任务/审核记录)
+      - ocr_db:/var/ocr/db
       # 持久化 bare repo 缓存 (加速后续审核，避免每次重新 clone)
       - ocr_repos:/var/ocr/repos
       # 临时工作目录 (审核后清理，可丢失)
@@ -62,7 +64,7 @@ services:
       - BLOCKING_SEVERITIES=${BLOCKING_SEVERITIES:-critical,high}
 
       # --- 存储 / 队列提示 ---
-      - STORAGE_PATH=${STORAGE_PATH:-/var/ocr/ocr.db}
+      - STORAGE_PATH=${STORAGE_PATH:-/var/ocr/db/ocr.db}
       - QUEUE_NOTICE_THRESHOLD=${QUEUE_NOTICE_THRESHOLD:-5}
       - GIT_COMMAND_TIMEOUT=${GIT_COMMAND_TIMEOUT:-300}
 
@@ -109,6 +111,10 @@ services:
 # Volumes 定义
 # ============================================
 volumes:
+  # SQLite 数据库
+  ocr_db:
+    driver: local
+
   # bare repo 缓存 (持久化，增长后可清理)
   ocr_repos:
     driver: local
