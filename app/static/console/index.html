@@ -29,6 +29,12 @@
       box-sizing: border-box;
     }
 
+    html,
+    body,
+    #app {
+      height: 100%;
+    }
+
     body {
       margin: 0;
       font-family: "IBM Plex Sans", "Noto Sans SC", "Segoe UI", sans-serif;
@@ -38,6 +44,13 @@
         radial-gradient(circle at 90% 5%, #ffe4cb 0, transparent 22%),
         linear-gradient(165deg, #f8fbff 0%, #f2f6ff 48%, #f6fbff 100%);
       min-height: 100vh;
+      overflow: hidden;
+    }
+
+    #app {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
     }
 
     .top {
@@ -92,6 +105,11 @@
       gap: 16px;
       max-width: 1500px;
       margin: 0 auto;
+      width: 100%;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;
+      overflow-x: hidden;
     }
 
     .card {
@@ -191,9 +209,48 @@
     }
 
     .table-wrap {
+      position: relative;
       overflow-x: auto;
       overflow-y: hidden;
+      width: 100%;
+      max-width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fbfdff;
       padding: 0 12px 12px;
+      scrollbar-gutter: stable;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .table-wrap::before,
+    .table-wrap::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 24px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s ease;
+      z-index: 3;
+    }
+
+    .table-wrap::before {
+      left: 0;
+      background: linear-gradient(90deg, rgba(16, 33, 59, 0.14), rgba(16, 33, 59, 0));
+    }
+
+    .table-wrap::after {
+      right: 0;
+      background: linear-gradient(270deg, rgba(16, 33, 59, 0.14), rgba(16, 33, 59, 0));
+    }
+
+    .table-wrap.show-left-shadow::before {
+      opacity: 1;
+    }
+
+    .table-wrap.show-right-shadow::after {
+      opacity: 1;
     }
 
     table {
@@ -265,7 +322,7 @@
 
     .split {
       display: grid;
-      grid-template-columns: 1.15fr 0.85fr;
+      grid-template-columns: 1fr 2fr;
       gap: 16px;
       min-height: 420px;
     }
@@ -675,7 +732,15 @@
           <span>Tasks</span>
           <span class="muted">{{ taskData.total }} total</span>
         </div>
-        <div class="table-wrap">
+        <div
+          class="table-wrap"
+          ref="taskTableWrap"
+          @scroll="onTaskTableScroll"
+          :class="{
+            'show-left-shadow': taskTableCanScroll && !taskTableAtLeft,
+            'show-right-shadow': taskTableCanScroll && !taskTableAtRight
+          }"
+        >
           <table class="tasks-table">
             <thead>
               <tr>
@@ -911,6 +976,9 @@
           findingPage: 1,
           findingPageSize: 50,
           findingError: "",
+          taskTableCanScroll: false,
+          taskTableAtLeft: true,
+          taskTableAtRight: true,
           copiedTip: "",
           timer: null
         };
@@ -926,12 +994,14 @@
       mounted() {
         this.applyStateFromUrl();
         this.reloadAll();
+        window.addEventListener("resize", this.updateTaskTableScrollState);
         this.timer = window.setInterval(this.autoRefresh, 8000);
       },
       beforeUnmount() {
         if (this.timer) {
           window.clearInterval(this.timer);
         }
+        window.removeEventListener("resize", this.updateTaskTableScrollState);
       },
       methods: {
         apiBase() {
@@ -973,6 +1043,7 @@
             await this.selectTask(this.taskData.items[0].task_id);
           }
           this.syncStateToUrl();
+          this.$nextTick(() => this.updateTaskTableScrollState());
           this.lastRefreshAt = new Date().toISOString();
         },
         async loadDashboard() {
@@ -1012,9 +1083,32 @@
             if (syncUrl) {
               this.syncStateToUrl();
             }
+            this.$nextTick(() => this.updateTaskTableScrollState());
           } catch (e) {
             this.taskError = `Load tasks failed: ${String(e)}`;
           }
+        },
+        onTaskTableScroll() {
+          this.updateTaskTableScrollState();
+        },
+        updateTaskTableScrollState() {
+          const wrap = this.$refs.taskTableWrap;
+          if (!wrap) {
+            this.taskTableCanScroll = false;
+            this.taskTableAtLeft = true;
+            this.taskTableAtRight = true;
+            return;
+          }
+          const maxScrollLeft = Math.max(0, wrap.scrollWidth - wrap.clientWidth);
+          const canScroll = maxScrollLeft > 1;
+          this.taskTableCanScroll = canScroll;
+          if (!canScroll) {
+            this.taskTableAtLeft = true;
+            this.taskTableAtRight = true;
+            return;
+          }
+          this.taskTableAtLeft = wrap.scrollLeft <= 1;
+          this.taskTableAtRight = wrap.scrollLeft >= maxScrollLeft - 1;
         },
         async changeTaskPage(page) {
           if (page < 1 || page > this.taskPages) {
