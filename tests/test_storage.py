@@ -1,4 +1,6 @@
 """storage: 任务 CRUD、幂等去重、状态更新、计数、webhook 事件。"""
+import sqlite3
+
 from app import storage
 
 
@@ -68,3 +70,59 @@ def test_queued_and_unposted_lists(temp_storage):
     assert any(t.task_id == tid for t in storage.get_queued_tasks())
     # 未到终态的任务不应出现在 unposted(done/failed 且 gitlab_posted=0)
     assert all(t.task_id != tid for t in storage.get_unposted_tasks())
+
+
+def test_init_db_backfills_legacy_missing_columns(tmp_path, monkeypatch):
+    from app import config
+
+    db = tmp_path / "legacy.db"
+    monkeypatch.setattr(config, "STORAGE_PATH", db)
+
+    conn = sqlite3.connect(str(db))
+    try:
+        conn.execute("""
+            CREATE TABLE review_task (
+                task_id TEXT PRIMARY KEY,
+                project_id TEXT,
+                mr_iid TEXT,
+                source_branch TEXT,
+                target_branch TEXT,
+                commit_sha TEXT,
+                project_url TEXT,
+                status TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE review_result (
+                task_id TEXT PRIMARY KEY
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE review_finding (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE webhook_event (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                received_at TEXT
+            )
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+    storage.init_db()
+
+    with storage._db() as check_conn:
+        rt_cols = {r["name"] for r in check_conn.execute("PRAGMA table_info(review_task)").fetchall()}
+        rr_cols = {r["name"] for r in check_conn.execute("PRAGMA table_info(review_result)").fetchall()}
+        rf_cols = {r["name"] for r in check_conn.execute("PRAGMA table_info(review_finding)").fetchall()}
+        we_cols = {r["name"] for r in check_conn.execute("PRAGMA table_info(webhook_event)").fetchall()}
+
+    assert "source" in rt_cols
+    assert {"approve", "summary", "stats_json", "error", "gitlab_posted", "pending_discussion_id", "pending_note_id", "created_at", "started_at", "finished_at"}.issubset(rt_cols)
+    assert {"status", "approve", "summary_text", "reject_reason", "session_id", "markdown_summary", "warnings_json", "raw_result_json", "created_at"}.issubset(rr_cols)
+    assert {"position", "path", "start_line", "end_line", "severity", "category", "content", "existing_code", "suggestion_code", "created_at"}.issubset(rf_cols)
+    assert {"request_uuid", "event_type", "project_id", "mr_iid", "commit_sha", "action", "payload_hash", "task_id"}.issubset(we_cols)

@@ -728,6 +728,19 @@
         }
       },
       methods: {
+        apiBase() {
+          const path = window.location.pathname || "";
+          const marker = "/console";
+          const idx = path.lastIndexOf(marker);
+          if (idx <= 0) {
+            return "";
+          }
+          return path.slice(0, idx);
+        },
+        apiUrl(path) {
+          const base = this.apiBase();
+          return `${base}${path}`;
+        },
         async autoRefresh() {
           const hasActive = this.taskData.items.some((t) => t.status === "queued" || t.status === "running");
           if (!hasActive) {
@@ -758,7 +771,7 @@
         },
         async loadDashboard() {
           try {
-            const resp = await fetch(`/api/console/dashboard?days=${this.dashboardDays}`);
+            const resp = await fetch(this.apiUrl(`/api/console/dashboard?days=${this.dashboardDays}`));
             if (!resp.ok) {
               throw new Error(`HTTP ${resp.status}`);
             }
@@ -779,7 +792,7 @@
                 params.set(k, v);
               }
             }
-            const resp = await fetch(`/api/console/tasks?${params.toString()}`);
+            const resp = await fetch(this.apiUrl(`/api/console/tasks?${params.toString()}`));
             if (!resp.ok) {
               throw new Error(`HTTP ${resp.status}`);
             }
@@ -831,7 +844,7 @@
             this.taskDetail = null;
           }
           try {
-            const resp = await fetch(`/api/console/tasks/${encodeURIComponent(taskId)}`);
+            const resp = await fetch(this.apiUrl(`/api/console/tasks/${encodeURIComponent(taskId)}`));
             if (!resp.ok) {
               throw new Error(`HTTP ${resp.status}`);
             }
@@ -859,7 +872,7 @@
                 params.set(k, v);
               }
             }
-            const resp = await fetch(`/api/console/tasks/${encodeURIComponent(this.selectedTaskId)}/findings?${params.toString()}`);
+            const resp = await fetch(this.apiUrl(`/api/console/tasks/${encodeURIComponent(this.selectedTaskId)}/findings?${params.toString()}`));
             if (!resp.ok) {
               throw new Error(`HTTP ${resp.status}`);
             }
