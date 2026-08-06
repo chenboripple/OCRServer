@@ -79,6 +79,10 @@ def run_ocr(repo_path: Path, target_branch: str, source_sha: str) -> dict:
         "--concurrency", str(config.OCR_CONCURRENCY),
         "--timeout", str(config.OCR_TIMEOUT_MIN),
     ]
+    # 大文件 agent 循环可能用完模板默认 30 轮 tool call 未收敛,被判 failed(budget);
+    # --max-tools 只能调大模板默认值(ocr shared.go:仅大于默认时生效),0=不传用 ocr 默认
+    if config.OCR_MAX_TOOLS > 0:
+        cmd += ["--max-tools", str(config.OCR_MAX_TOOLS)]
     # 把审核输出语言直接喂给 LLM 兜底:ocr config 的 language 字段按文档应控制全部评论语言,
     # 但实测逐行 inline 评论仍可能为英文(config 未被读取或版本行为);--background 会进入
     # LLM 上下文,确保 code_comment 也按目标语言输出。留空则不注入,沿用 ocr 默认。

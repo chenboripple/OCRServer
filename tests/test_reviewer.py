@@ -1,7 +1,9 @@
 """reviewer:结果解析、approve/reject 判定、评论格式化。"""
+from pathlib import Path
+
 import pytest
 
-from app import reviewer
+from app import config, reviewer
 
 
 def _comment(severity, **kw):
@@ -117,6 +119,39 @@ def test_partial_note_lists_failed_files_from_manifest(blocking_severities):
     assert "`src/Big.java`" in rr.markdown_summary
     assert "timeout" in rr.markdown_summary
     assert "OCR_TIMEOUT_MIN" in rr.markdown_summary, "超时分类应提示调大单文件时限"
+
+
+# ── run_ocr 命令构造 ──────────────────────────────────
+class _FakeProc:
+    returncode = 0
+    stdout = '{"status": "success", "comments": []}'
+    stderr = ""
+
+
+def _capture_ocr_cmd(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        reviewer.subprocess, "run",
+        lambda cmd, **kw: (captured.__setitem__("cmd", cmd), _FakeProc())[1],
+    )
+    return captured
+
+
+def test_run_ocr_passes_max_tools(monkeypatch):
+    """OCR_MAX_TOOLS>0 时传 --max-tools(大文件 failed(budget) 的解法)。"""
+    captured = _capture_ocr_cmd(monkeypatch)
+    monkeypatch.setattr(config, "OCR_MAX_TOOLS", 60)
+    reviewer.run_ocr(Path("/tmp/repo"), "main", "abc")
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("--max-tools") + 1] == "60"
+
+
+def test_run_ocr_omits_max_tools_when_zero(monkeypatch):
+    """OCR_MAX_TOOLS=0 时不传,沿用 ocr 模板默认(30 轮)。"""
+    captured = _capture_ocr_cmd(monkeypatch)
+    monkeypatch.setattr(config, "OCR_MAX_TOOLS", 0)
+    reviewer.run_ocr(Path("/tmp/repo"), "main", "abc")
+    assert "--max-tools" not in captured["cmd"]
 
 
 def test_partial_failed_files_fallback_to_warnings(blocking_severities):

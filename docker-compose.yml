@@ -54,6 +54,8 @@ services:
       - OCR_TIMEOUT_MIN=${OCR_TIMEOUT_MIN:-40}
       # 单个 MR 请求总超时,必须 > OCR_TIMEOUT_MIN*60
       - REQUEST_TIMEOUT_SEC=${REQUEST_TIMEOUT_SEC:-3600}
+      # 单文件 tool call 轮数上限(0=ocr 默认 30;大文件 failed(budget) 时调大,如 60)
+      - OCR_MAX_TOOLS=${OCR_MAX_TOOLS:-0}
 
       # --- GitLab 配置 (回写评论用) ---
       # *必填*: 请在 .env 文件中配置或取消注释并修改

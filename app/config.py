@@ -36,6 +36,9 @@ OCR_BIN = _env("OCR_BIN", "ocr")
 OCR_CONCURRENCY = _env_int("OCR_CONCURRENCY", 8)
 # ocr review 任务超时(分钟)
 OCR_TIMEOUT_MIN = _env_int("OCR_TIMEOUT_MIN", 40)
+# 单文件允许的 tool call 轮数(ocr --max-tools)。ocr 模板默认 30,
+# 大文件 agent 循环可能 30 轮不收敛被判 failed(budget);0=用 ocr 默认,设置时最小 10
+OCR_MAX_TOOLS = _env_int("OCR_MAX_TOOLS", 0)
 # 单个 MR 请求的总超时(秒),建议 > OCR_TIMEOUT_MIN * 60
 REQUEST_TIMEOUT_SEC = _env_int("REQUEST_TIMEOUT_SEC", 3600)
 # 同时处理的 MR 数(线程池大小)
