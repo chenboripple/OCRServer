@@ -1,0 +1,31 @@
+app/reviewer.py
+  7d4ab21cd84573bd 82-85
+app/config.py
+  7d4ab21cd84573bd 39-41
+.env.example
+  7d4ab21cd84573bd 26
+tests/test_reviewer.py
+  7d4ab21cd84573bd 2-3,6,124-156
+docker-compose.yml
+  7d4ab21cd84573bd 57-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "bdc1c3a6be7f5bba042a08821c20d49b4aa3a908",
+  "prompts": {
+    "7d4ab21cd84573bd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d13738a6-fede-4311-9445-7d77d27f1b86",
+        "model": "claude-opus"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 46,
+      "total_deletions": 1,
+      "accepted_lines": 46,
+      "overriden_lines": 0
+    }
+  }
+}
