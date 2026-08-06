@@ -45,11 +45,15 @@ services:
       - OCR_USE_ANTHROPIC=${OCR_USE_ANTHROPIC}
       - OCR_NO_UPDATE=true
 
-      # --- 性能调优 (默认值见 .env.example/config.py,.env 可覆盖) ---
+      # --- 性能调优 (默认值与 .env.example/config.py 对齐,.env 可覆盖) ---
       - MAX_CONCURRENT_REVIEWS=${MAX_CONCURRENT_REVIEWS:-2}
       - OCR_CONCURRENCY=${OCR_CONCURRENCY:-8}
-      - OCR_TIMEOUT_MIN=${OCR_TIMEOUT_MIN:-10}
-      - REQUEST_TIMEOUT_SEC=${REQUEST_TIMEOUT_SEC:-900}
+      # 注意:该值同时用于 ocr --timeout(单文件任务超时,分钟)和 Python 侧
+      # 子进程整体超时(=该值*60 秒)。新版 ocr agent 模式单文件就要数分钟,
+      # 整体耗时随文件数增长,默认 10 分钟会把正常审核中途杀掉(与 config.py 默认 40 对齐)。
+      - OCR_TIMEOUT_MIN=${OCR_TIMEOUT_MIN:-40}
+      # 单个 MR 请求总超时,必须 > OCR_TIMEOUT_MIN*60
+      - REQUEST_TIMEOUT_SEC=${REQUEST_TIMEOUT_SEC:-3600}
 
       # --- GitLab 配置 (回写评论用) ---
       # *必填*: 请在 .env 文件中配置或取消注释并修改

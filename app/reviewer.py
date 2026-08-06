@@ -65,6 +65,9 @@ def run_ocr(repo_path: Path, target_branch: str, source_sha: str) -> dict:
     _is_sha = len(target_branch) == 40 and all(c in "0123456789abcdef" for c in target_branch.lower())
     _from_ref = target_branch if _is_sha else f"origin/{target_branch}"
 
+    # 超时语义注意(ocr 源码 shared_flags.go):--timeout 是"单个文件任务"的分钟数,
+    # ocr 内部没有整体超时;整体兜底靠下面 subprocess 的 timeout=OCR_TIMEOUT_MIN*60。
+    # OCR_TIMEOUT_MIN 调小时两者一起缩,文件多/LLM 慢的正常审核可能被整体超时误杀。
     cmd = [
         config.OCR_BIN,
         "review",
