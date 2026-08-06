@@ -1,0 +1,35 @@
+app/repo_cache.py
+  7d4ab21cd84573bd 11,61-62,69,95-99,104,107,111-128,132,134,140,152,200,204,217
+deploy/README.md
+  7d4ab21cd84573bd 51,53
+app/orchestrator.py
+  7d4ab21cd84573bd 39,44,53,158,161,167
+app/gitlab_client.py
+  7d4ab21cd84573bd 8,40,42,50,52-53,66-82
+tests/test_gitlab_client.py
+  7d4ab21cd84573bd 65-76
+.env.example
+  7d4ab21cd84573bd 49
+tests/test_repo_cache.py
+  7d4ab21cd84573bd 136-175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "3cb93f54a866f2396cd3830c886f5ab2d0941596",
+  "prompts": {
+    "7d4ab21cd84573bd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d13738a6-fede-4311-9445-7d77d27f1b86",
+        "model": "claude-opus"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 120,
+      "total_deletions": 19,
+      "accepted_lines": 120,
+      "overriden_lines": 0
+    }
+  }
+}
