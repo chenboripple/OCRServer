@@ -48,8 +48,9 @@ CI Job: approve=False 则 exit 1 ──> pipeline 失败 ──> 阻止 merge
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -
 sudo apt-get install -y nodejs
 
-# 2. Python 3.10+ 和 git
+# 2. Python 3.10+ 和 git(注意:git 需 ≥ 2.31,认证通过 GIT_CONFIG_* 环境变量注入)
 sudo apt-get install -y python3 python3-venv python3-pip git
+git --version
 
 # 3. 装 ocr(最新版;运行时自动更新已由 OCR_NO_UPDATE=true 单独禁用,防二进制截断)
 sudo npm install -g @alibaba-group/open-code-review@latest

@@ -5,6 +5,7 @@ inline 评论(discussions)与汇总 note 回写。
 逻辑参考 ocr 官方 examples/gitlab_ci/.gitlab-ci.yml 的回写脚本,
 封装为可复用类,加入限流重试。
 """
+import base64
 import json
 import random
 import time
@@ -36,9 +37,9 @@ class GitLabClient:
         self.success_delay = 2.0         # 成功后 pacing
         self.rate_limit_threshold = 10   # RateLimit-Remaining <= 此值则加倍 pacing
 
-    # ── 仓库 clone URL:把 token 注入 https URL ───────────────
+    # ── 仓库 clone URL:干净 URL,认证走 git_auth_env 的 Basic 头 ──
     def clone_url(self, project_url: str) -> str:
-        """把 web URL 或 ssh URL 转成带 token 的可 clone URL。
+        """把 web URL 或 ssh URL 转成可 clone URL(不含凭据)。
 
         支持的输入格式:
         - http://host/group/project        (GitLab webhook web_url 格式)
@@ -46,8 +47,10 @@ class GitLabClient:
         - ssh://git@host:port/group/project.git
         - git@host:group/project.git
 
-        输出格式: {protocol}://oauth2:{token}@{host}/group/project.git
+        输出格式: {protocol}://{host}/group/project.git
         协议和主机名取自 GITLAB_URL 配置。
+        认证不内嵌 URL(token 含特殊字符时 URL 内嵌会被截断/解析错),
+        改由 git_auth_env() 以 HTTP Basic 头注入(等价 curl -u user:token)。
         """
         if not project_url:
             raise GitLabError("project_url 为空")
@@ -60,8 +63,23 @@ class GitLabClient:
         # 从输入的 URL 中提取项目路径
         project_path = self._extract_project_path(project_url)
 
-        # 构造带 token 的 clone URL
-        return f"{base_protocol}://{config.GITLABClone_AUTH_USER}:{self.token}@{base_host}/{project_path}"
+        return f"{base_protocol}://{base_host}/{project_path}"
+
+    def git_auth_env(self) -> dict[str, str]:
+        """git 命令的 HTTP Basic 认证环境变量(等价 curl -u user:token)。
+
+        通过 GIT_CONFIG_* 环境变量注入 http.extraHeader,git ≥ 2.31 支持。
+        token 经 base64 编码进 Authorization 头,不受特殊字符影响,
+        也不落盘(不写入 remote URL)、不出现在进程命令行。
+        """
+        basic = base64.b64encode(
+            f"{config.GITLABClone_AUTH_USER}:{self.token}".encode()
+        ).decode()
+        return {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.extraHeader",
+            "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}",
+        }
 
     @staticmethod
     def _extract_project_path(project_url: str) -> str:

@@ -36,10 +36,12 @@ def do_review_sync(req: ReviewRequest) -> ReviewResponse:
     storage.update_status(task_id, "running")
 
     clone_url = req.project_url
+    git_env = None
     gl = get_gitlab()
     if gl:
         log.info(f"GitLab 客户端已初始化，进行 URL 转换")
         clone_url = gl.clone_url(req.project_url)
+        git_env = gl.git_auth_env()
         log.info("已完成 clone URL 转换")
     else:
         log.warning("GitLab 客户端未初始化，将使用原始项目 URL")
@@ -48,7 +50,7 @@ def do_review_sync(req: ReviewRequest) -> ReviewResponse:
     wt_path = None
     try:
         wt_path, source_sha = repo_cache.prepare(
-            req.project_id, clone_url, req.source_branch, req.target_branch
+            req.project_id, clone_url, req.source_branch, req.target_branch, git_env=git_env
         )
         to_sha = req.commit_sha or source_sha
         # bare repo 没有 origin 远程,直接取本地 ref commit sha
@@ -153,14 +155,16 @@ def do_review_async(task_id: str):
         return
 
     clone_url = task.project_url
+    git_env = None
     if gl:
         clone_url = gl.clone_url(task.project_url)
+        git_env = gl.git_auth_env()
 
     wt_path = None
     try:
         # 1. 准备仓库
         wt_path, source_sha = repo_cache.prepare(
-            task.project_id, clone_url, task.source_branch, task.target_branch
+            task.project_id, clone_url, task.source_branch, task.target_branch, git_env=git_env
         )
         to_sha = task.commit_sha or source_sha
         target_sha = repo_cache.get_ref_sha(task.project_id, task.target_branch)

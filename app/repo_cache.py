@@ -8,6 +8,7 @@
 ocr 需要 work-tree(file_read/code_search 在工作树上跑),不能直接跑在 bare repo 上。
 """
 import logging
+import os
 import shutil
 import subprocess
 import uuid
@@ -57,13 +58,15 @@ class RepoCache:
         safe_args = [_redact_url(a) for a in args]
         cmd_str = " ".join(["git"] + safe_args)
         log.debug(f"执行 git 命令: {cmd_str} (cwd={cwd}, timeout={self.git_timeout}s)")
+        # subprocess 传 env 会整体替换环境(丢 PATH 等),必须与 os.environ 合并
+        run_env = {**os.environ, **env} if env else None
         try:
             result = subprocess.run(
                 ["git"] + args,
                 cwd=str(cwd) if cwd else None,
                 capture_output=True,
                 text=True,
-                env=env,
+                env=run_env,
                 timeout=self.git_timeout,
             )
             if result.returncode != 0:
@@ -89,30 +92,52 @@ class RepoCache:
             log.error(timeout_msg)
             raise RepoError(f"git 命令超时({self.git_timeout}s): {cmd_str}") from e
 
-    def ensure_bare(self, project_id: str, clone_url: str) -> Path:
-        """确保 bare repo 存在;不存在则 clone --bare,存在则跳过(由 fetch 更新)。"""
+    def ensure_bare(self, project_id: str, clone_url: str, git_env: dict | None = None) -> Path:
+        """确保 bare repo 存在;不存在则 clone --bare,存在则跳过(由 fetch 更新)。
+
+        git_env: git 命令附加环境变量(如 http.extraHeader 认证头)。
+        """
         bare = self._bare_path(project_id)
         if not bare.exists():
             log.info(f"首次 clone bare repo: project={project_id}, url={_redact_url(clone_url)}")
             # 首次:clone bare
-            self._run_git(["clone", "--bare", clone_url, str(bare)])
+            self._run_git(["clone", "--bare", clone_url, str(bare)], env=git_env)
             log.info(f"clone 完成: {bare}")
         else:
+            self._scrub_origin_credentials(bare)
             log.debug(f"bare repo 已存在: {bare}")
         return bare
 
-    def fetch_branches(self, project_id: str, clone_url: str, branches: list[str]) -> Path:
+    def _scrub_origin_credentials(self, bare: Path) -> None:
+        """清理历史遗留:旧版本把 token 内嵌进 clone URL,clone --bare 后残留在
+        remote.origin.url 里长期落盘;发现带凭据的 origin URL 则移除(尽力,失败不抛)。
+        """
+        try:
+            origin_url = self._run_git(["config", "--get", "remote.origin.url"], cwd=bare).strip()
+        except RepoError:
+            return  # 无 origin(bare clone 常见),无需处理
+        try:
+            if "@" in (urlsplit(origin_url).netloc or ""):
+                self._run_git(["config", "--unset", "remote.origin.url"], cwd=bare)
+                log.info(f"已清理 bare repo 中残留的带凭据 origin URL: {bare}")
+        except RepoError as e:
+            log.warning(f"清理 origin URL 失败(不影响 fetch): {e}")
+
+    def fetch_branches(
+        self, project_id: str, clone_url: str, branches: list[str], git_env: dict | None = None
+    ) -> Path:
         """fetch 指定分支到 bare cache(增量),返回 bare repo 路径。
 
         branches: 需要的分支名(如 source/target),都会 fetch。
+        git_env: git 命令附加环境变量(如 http.extraHeader 认证头)。
         """
-        bare = self.ensure_bare(project_id, clone_url)
+        bare = self.ensure_bare(project_id, clone_url, git_env=git_env)
         log.info(f"fetch 分支: project={project_id}, branches={branches}")
         # fetch 这些分支,建立 FETCH_HEAD;refspec 写到 refs/heads/<branch> 便于后续引用
         refspecs = [f"+refs/heads/{b}:refs/heads/{b}" for b in branches]
         cmd = ["fetch", clone_url] + refspecs + ["--tags"]
         try:
-            self._run_git(cmd, cwd=bare)
+            self._run_git(cmd, cwd=bare, env=git_env)
         except RepoError as e:
             # 分支被某工作树"检出"占用 -> git 拒绝更新 refs/heads/<branch>。
             # prune 清理"目录已不存在"的失效工作树注册后重试一次,释放被占用的分支。
@@ -124,7 +149,7 @@ class RepoCache:
                     self._run_git(["worktree", "prune"], cwd=bare)
                 except RepoError:
                     log.debug("worktree prune 无变化")
-                self._run_git(cmd, cwd=bare)  # 重试;再失败则抛出
+                self._run_git(cmd, cwd=bare, env=git_env)  # 重试;再失败则抛出
             else:
                 raise
         log.info(f"fetch 完成")
@@ -172,9 +197,11 @@ class RepoCache:
         clone_url: str,
         source_branch: str,
         target_branch: str,
+        git_env: dict | None = None,
     ) -> tuple[Path, str]:
         """一键准备:清理遗留工作树 + fetch 两个分支 + 建 source 工作树。
 
+        git_env: git 网络命令(clone/fetch)附加环境变量,如 http.extraHeader 认证头。
         返回 (worktree_path, source_commit_sha)。
         ocr 在 worktree_path 上跑:ocr review --repo <wt> --from <target_sha> --to <source_commit>
         """
@@ -187,7 +214,7 @@ class RepoCache:
             except RepoError:
                 log.debug("git worktree prune 无变化")
 
-        self.fetch_branches(project_id, clone_url, [source_branch, target_branch])
+        self.fetch_branches(project_id, clone_url, [source_branch, target_branch], git_env=git_env)
         wt_path, commit_sha = self.make_worktree(project_id, source_branch)
         return wt_path, commit_sha
 

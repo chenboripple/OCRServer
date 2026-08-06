@@ -62,7 +62,18 @@ def test_extract_project_path_adds_git_suffix():
 def test_clone_url(monkeypatch):
     monkeypatch.setattr(gitlab_client.config, "GITLABClone_AUTH_USER", "oauth2")
     c = GitLabClient(gitlab_url="https://gitlab.example.com", token="TOK")
-    assert c.clone_url("https://gitlab.example.com/g/p.git") == "https://oauth2:TOK@gitlab.example.com/g/p.git"
+    # URL 不含凭据,认证由 git_auth_env() 的 Basic 头注入
+    assert c.clone_url("https://gitlab.example.com/g/p.git") == "https://gitlab.example.com/g/p.git"
+
+
+def test_git_auth_env(monkeypatch):
+    monkeypatch.setattr(gitlab_client.config, "GITLABClone_AUTH_USER", "oauth2")
+    c = GitLabClient(gitlab_url="https://gitlab.example.com", token="TOK")
+    env = c.git_auth_env()
+    assert env["GIT_CONFIG_COUNT"] == "1"
+    assert env["GIT_CONFIG_KEY_0"] == "http.extraHeader"
+    # base64("oauth2:TOK") = "b2F1dGgyOlRPSw=="
+    assert env["GIT_CONFIG_VALUE_0"] == "Authorization: Basic b2F1dGgyOlRPSw=="
 
 
 # ── API 调用(urllib mock)──────────────────────────

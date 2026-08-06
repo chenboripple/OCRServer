@@ -133,3 +133,43 @@ def test_fetch_non_checked_out_error_not_retried(repo_cache, monkeypatch):
     with pytest.raises(RepoError):
         rc.fetch_branches("proj-noretry", remote, ["feature"])
     assert state["fetch_attempts"] == 1, "非 checked out 错误不应重试"
+
+
+# ── git_env:认证环境变量透传 + os.environ 合并 ───────────────
+def test_git_env_merged_with_os_environ(repo_cache, monkeypatch):
+    """传 git_env 时 subprocess 的 env 必须与 os.environ 合并(PATH 等不能丢)。"""
+    rc, remote = repo_cache
+    from app import repo_cache as rc_mod
+
+    captured = {}
+    real_run = rc_mod.subprocess.run
+
+    def fake_run(cmd, **kwargs):
+        env = kwargs.get("env")
+        if env is not None and "OCR_TEST_FLAG" in env:
+            captured["env"] = env
+        return real_run(cmd, **kwargs)
+
+    monkeypatch.setattr(rc_mod.subprocess, "run", fake_run)
+    rc.prepare("proj-env", remote, "feature", "main", git_env={"OCR_TEST_FLAG": "1"})
+    assert captured["env"]["OCR_TEST_FLAG"] == "1", "git_env 应透传到 git 子进程"
+    assert "PATH" in captured["env"], "env 必须与 os.environ 合并,不能整体替换"
+
+
+# ── 旧缓存自愈:清理残留的带 token origin URL ────────────────
+def test_scrub_origin_credentials(repo_cache):
+    """历史遗留的 token 内嵌 origin URL,ensure_bare 应自动移除。"""
+    rc, remote = repo_cache
+    rc.ensure_bare("proj-scrub", remote)
+    bare = rc._bare_path("proj-scrub")
+    # 模拟旧版本 clone 残留:origin URL 里内嵌凭据
+    subprocess.run(
+        ["git", "config", "remote.origin.url", "http://oauth2:secret@host/g/p.git"],
+        cwd=str(bare), check=True,
+    )
+    rc.ensure_bare("proj-scrub", remote)
+    r = subprocess.run(
+        ["git", "config", "--get", "remote.origin.url"],
+        cwd=str(bare), capture_output=True, text=True,
+    )
+    assert r.returncode != 0, "带凭据的 origin URL 应被移除"
