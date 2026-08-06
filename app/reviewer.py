@@ -158,16 +158,22 @@ def decide(result_json: dict) -> ReviewResult:
     if status and status not in _SUCCESS_STATUSES:
         if status in _PARTIAL_STATUSES:
             # 覆盖不完整:拦截转人工,但已有评论照常回写 MR
+            failed_files = _extract_failed_files(result_json)
+            failed_names = ", ".join(f["path"] for f in failed_files[:5])
+            more = f" 等 {len(failed_files)} 个文件" if len(failed_files) > 5 else ""
             return ReviewResult(
                 approve=False,
                 status=status,
-                summary_text=f"审核未完整覆盖({status}): {len(comments)} 条评论,需人工复核",
-                reject_reason=f"审核未完整覆盖所有文件(status={status}),放行有漏审风险,请人工复核",
+                summary_text=f"审核未完整覆盖({status}): {len(comments)} 条评论,{len(failed_files)} 个文件失败,需人工复核",
+                reject_reason=(
+                    f"审核未完整覆盖所有文件(status={status}),失败文件: {failed_names}{more or '未知'};"
+                    f"未审文件可能藏有问题,请人工复核"
+                ),
                 stats=summary_obj,
                 comments=comments,
                 warnings=warnings,
                 session_id=session_id,
-                markdown_summary=_build_error_note(result_json),
+                markdown_summary=_build_partial_note(result_json, failed_files),
             )
         if status == "skipped":
             return ReviewResult(
@@ -302,6 +308,70 @@ def _build_error_note(result_json: dict) -> str:
         f"ocr 返回异常状态,未放行,请人工复核。\n\n"
         f"```\n{json.dumps(result_json, ensure_ascii=False, indent=2)[:2000]}\n```"
     )
+
+
+def _extract_failed_files(result_json: dict) -> list[dict]:
+    """提取审核失败的文件清单(path/classification/reason)。
+
+    优先 manifest.coverage.failed(新版 ocr,含失败分类:timeout/provider/budget 等),
+    无 manifest 时降级取 warnings(旧版,{file,message,type})。
+    """
+    failed: list[dict] = []
+    coverage = (result_json.get("manifest") or {}).get("coverage") or {}
+    for item in coverage.get("failed") or []:
+        failed.append({
+            "path": item.get("path") or item.get("old_path") or "?",
+            "classification": item.get("classification") or "",
+            "reason": item.get("reason") or "",
+        })
+    if failed:
+        return failed
+    for w in result_json.get("warnings") or []:
+        if not isinstance(w, dict):
+            continue
+        failed.append({
+            "path": w.get("file") or "?",
+            "classification": w.get("type") or "",
+            "reason": w.get("message") or "",
+        })
+    return failed
+
+
+def _build_partial_note(result_json: dict, failed_files: list[dict]) -> str:
+    """partial/completed_with_errors 的 MR 提示:列出失败文件与原因。
+
+    大 MR 的完整 JSON 远超截断上限,_build_error_note 的 JSON dump 到不了
+    warnings/manifest 字段,这里直接把关键信息提炼出来。
+    """
+    summary = result_json.get("summary", {}) or {}
+    lines = [
+        "## ⚠️ OpenCodeReview 审核未完整覆盖",
+        "",
+        f"状态: `{result_json.get('status', '')}` — {result_json.get('message', '')}",
+        "",
+        "以下文件审核失败,**未审文件可能藏有问题,已拦截 merge**,请人工复核:",
+        "",
+    ]
+    if failed_files:
+        for f in failed_files:
+            cls = f" [{f['classification']}]" if f["classification"] else ""
+            lines.append(f"- `{f['path']}`{cls}")
+            if f["reason"]:
+                lines.append(f"  - 原因: {f['reason'][:200]}")
+    else:
+        lines.append("- (ocr 未返回失败文件明细,请查看服务日志)")
+    lines += [
+        "",
+        f"其余文件审核正常: comments={summary.get('comments', '?')}, "
+        f"elapsed={summary.get('elapsed', '?')}, tokens={summary.get('total_tokens', '?')}",
+    ]
+    if any(f["classification"] == "timeout" for f in failed_files):
+        lines += [
+            "",
+            "> 💡 存在单文件超时:该文件 diff 过大,agent 审核超过了单文件时限"
+            "(`OCR_TIMEOUT_MIN` 分钟)。可调大该环境变量,或拆分大 MR。",
+        ]
+    return "\n".join(lines)
 
 
 def format_inline_comment(comment: dict) -> str:

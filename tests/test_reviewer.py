@@ -98,6 +98,40 @@ def test_completed_with_errors_blocks(blocking_severities):
     assert "未完整覆盖" in rr.reject_reason
 
 
+def test_partial_note_lists_failed_files_from_manifest(blocking_severities):
+    """partial 拦截提示应从 manifest.coverage.failed 提取失败文件与原因。"""
+    rr = reviewer.decide({
+        "status": "partial",
+        "message": "Review partially complete: 37 finding(s); 1 of 38 selected item(s) failed.",
+        "comments": [_comment("medium")],
+        "summary": {"files_reviewed": 38, "comments": 37, "elapsed": "9m42s"},
+        "manifest": {
+            "coverage": {
+                "failed": [{"item_id": "abc", "path": "src/Big.java",
+                            "classification": "timeout", "reason": "per-file deadline exceeded"}],
+            }
+        },
+    })
+    assert rr.approve is False
+    assert "src/Big.java" in rr.reject_reason
+    assert "`src/Big.java`" in rr.markdown_summary
+    assert "timeout" in rr.markdown_summary
+    assert "OCR_TIMEOUT_MIN" in rr.markdown_summary, "超时分类应提示调大单文件时限"
+
+
+def test_partial_failed_files_fallback_to_warnings(blocking_severities):
+    """无 manifest(旧版 ocr)时降级从 warnings 提取失败文件。"""
+    rr = reviewer.decide({
+        "status": "completed_with_errors",
+        "comments": [],
+        "summary": {},
+        "warnings": [{"file": "a.py", "message": "subtask error", "type": "subtask_failed"}],
+    })
+    assert rr.approve is False
+    assert "a.py" in rr.reject_reason
+    assert "`a.py`" in rr.markdown_summary
+
+
 def test_skipped_status_is_treated_as_pass(blocking_severities):
     rr = reviewer.decide(
         {
