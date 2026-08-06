@@ -48,6 +48,56 @@ def test_abnormal_status_rejects(blocking_severities):
     assert "异常" in rr.summary_text
 
 
+def test_complete_status_is_normal_review(blocking_severities):
+    """新版 ocr 返回 status="complete" 表示审核正常完成,不得误判为异常。
+
+    回归:旧逻辑只认 "success",complete 被当异常状态 → 假"审核异常,人工复核"。
+    """
+    # 无阻塞问题 -> 放行
+    rr = reviewer.decide(
+        {"status": "complete", "message": "Review complete: 1 finding(s)",
+         "comments": [_comment("medium")], "summary": {}}
+    )
+    assert rr.approve is True
+    assert "异常" not in rr.summary_text
+    # 有阻塞问题 -> 正常按 severity 卡点(而非误报异常)
+    rr2 = reviewer.decide(
+        {"status": "complete", "comments": [_comment("high")], "summary": {}}
+    )
+    assert rr2.approve is False
+    assert "需修复" in rr2.reject_reason
+
+
+def test_completed_with_warnings_is_normal_review(blocking_severities):
+    """completed_with_warnings = 审完但带非致命警告,按正常结果卡点。"""
+    rr = reviewer.decide(
+        {"status": "completed_with_warnings", "comments": [_comment("low")],
+         "warnings": [{"file": "a.py", "error": "token threshold"}], "summary": {}}
+    )
+    assert rr.approve is True
+    assert "异常" not in rr.summary_text
+    assert rr.warnings, "warnings 应保留用于汇总 note 展示"
+
+
+def test_partial_status_blocks_but_keeps_comments(blocking_severities):
+    """partial = 部分文件未审到:拦截转人工,但已有评论保留(照常回写 MR)。"""
+    rr = reviewer.decide(
+        {"status": "partial", "comments": [_comment("medium")], "summary": {}}
+    )
+    assert rr.approve is False
+    assert "未完整覆盖" in rr.reject_reason
+    assert len(rr.comments) == 1, "评论应保留回写 MR"
+
+
+def test_completed_with_errors_blocks(blocking_severities):
+    """旧版 completed_with_errors 与 partial 同策略:覆盖不完整不放行。"""
+    rr = reviewer.decide(
+        {"status": "completed_with_errors", "comments": [], "summary": {}}
+    )
+    assert rr.approve is False
+    assert "未完整覆盖" in rr.reject_reason
+
+
 def test_skipped_status_is_treated_as_pass(blocking_severities):
     rr = reviewer.decide(
         {

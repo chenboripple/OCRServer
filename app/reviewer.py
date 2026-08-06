@@ -130,6 +130,18 @@ def _severity_rank(sev: str) -> int:
     return {"critical": 4, "high": 3, "medium": 2, "low": 1}.get((sev or "").lower(), 0)
 
 
+# ocr 各版本"审核正常完成"的状态词不一致,这些状态都不影响卡点,
+# 卡点统一看 comments 里的 critical/high:
+#   旧版(无 manifest): success / completed_with_warnings(带警告但结果完整)
+#   新版(带 manifest): complete(全部选中文件审完,message 形如 "Review complete: N finding(s)")
+_SUCCESS_STATUSES = {"success", "complete", "completed_with_warnings"}
+
+# 覆盖不完整:部分文件审核失败没审到(新版 partial / 旧版 completed_with_errors)。
+# 不能按已有评论卡点——未审文件可能藏有 critical/high,放行即假绿;
+# 继续拦截转人工复核,但已有评论照常回写 MR(见 decide 分支)。
+_PARTIAL_STATUSES = {"partial", "completed_with_errors"}
+
+
 def decide(result_json: dict) -> ReviewResult:
     """根据 ocr JSON 结果判定 approve/reject 并构造 ReviewResult。"""
     status = result_json.get("status", "")
@@ -140,7 +152,20 @@ def decide(result_json: dict) -> ReviewResult:
     message = result_json.get("message", "")
 
     # status 异常 -> 不放行(避免假绿)
-    if status and status != "success":
+    if status and status not in _SUCCESS_STATUSES:
+        if status in _PARTIAL_STATUSES:
+            # 覆盖不完整:拦截转人工,但已有评论照常回写 MR
+            return ReviewResult(
+                approve=False,
+                status=status,
+                summary_text=f"审核未完整覆盖({status}): {len(comments)} 条评论,需人工复核",
+                reject_reason=f"审核未完整覆盖所有文件(status={status}),放行有漏审风险,请人工复核",
+                stats=summary_obj,
+                comments=comments,
+                warnings=warnings,
+                session_id=session_id,
+                markdown_summary=_build_error_note(result_json),
+            )
         if status == "skipped":
             return ReviewResult(
                 approve=True,
