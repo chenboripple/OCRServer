@@ -92,6 +92,13 @@ SQLITE_WAL_ENABLED = _env_bool("SQLITE_WAL_ENABLED", True)
 REPOST_MAX_ATTEMPTS = _env_int("REPOST_MAX_ATTEMPTS", 3)
 REPOST_INTERVAL_MIN = _env_int("REPOST_INTERVAL_MIN", 10)
 
+# ── 通知 Webhook(审核结果推送到企业微信/飞书群机器人) ──────
+NOTIFY_ENABLED = _env_bool("NOTIFY_ENABLED", False)
+NOTIFY_TYPE = _env("NOTIFY_TYPE", "wechat")            # wechat | feishu
+NOTIFY_WEBHOOK_URL = _env("NOTIFY_WEBHOOK_URL", "")    # 机器人 webhook 完整地址
+NOTIFY_SIGN_SECRET = _env("NOTIFY_SIGN_SECRET", "")    # 可选:加签密钥(飞书/企微均支持)
+NOTIFY_TIMEOUT_SEC = _env_int("NOTIFY_TIMEOUT_SEC", 10)
+
 # ── Feishu(飞书电子表格集成) ─────────────────────────────────
 # 每次 review 前从飞书电子表格读取自定义审核规则,更新到 ocr 配置文件中
 # 表格格式:第一列任意(如序号),第二列为审核规则文本

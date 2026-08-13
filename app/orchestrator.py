@@ -4,6 +4,7 @@ import logging
 import shutil
 
 from . import config
+from . import notifier
 from . import reviewer
 from . import storage
 from .repost import post_to_gitlab
@@ -17,6 +18,23 @@ log = logging.getLogger("ocr-server")
 def submit_to_executor(task_id: str):
     """把任务丢给线程池(从 background_tasks 调用,避免阻塞响应)。"""
     executor.submit(do_review_async, task_id)
+
+
+def _submit_notify(*, project_url, source_branch, target_branch,
+                   approve, summary="", error=None):
+    """后台投递审核结果通知(失败不影响主流程)。"""
+    try:
+        executor.submit(
+            notifier.dispatch,
+            project_url=project_url,
+            source_branch=source_branch,
+            target_branch=target_branch,
+            approve=approve,
+            summary=summary,
+            error=error,
+        )
+    except Exception as e:
+        log.warning(f"提交通知任务失败: {e}")
 
 
 def do_review_sync(req: ReviewRequest) -> ReviewResponse:
@@ -73,6 +91,13 @@ def do_review_sync(req: ReviewRequest) -> ReviewResponse:
             gitlab_posted=0,
         )
         log.info(f"MR !{req.mr_iid} 完成: approve={rr.approve}, {rr.summary_text}")
+        _submit_notify(
+            project_url=req.project_url,
+            source_branch=req.source_branch,
+            target_branch=req.target_branch,
+            approve=rr.approve,
+            summary=rr.summary_text,
+        )
 
         if gl:
             try:
@@ -92,6 +117,13 @@ def do_review_sync(req: ReviewRequest) -> ReviewResponse:
         )
     except Exception as e:
         storage.update_status(task_id, "failed", error=str(e))
+        _submit_notify(
+            project_url=req.project_url,
+            source_branch=req.source_branch,
+            target_branch=req.target_branch,
+            approve=False,
+            error=str(e),
+        )
         raise
     finally:
         if wt_path:
@@ -224,12 +256,26 @@ def do_review_async(task_id: str):
             stats_json=json.dumps(rr.stats),
             gitlab_posted=gitlab_posted,
         )
+        _submit_notify(
+            project_url=task.project_url,
+            source_branch=task.source_branch,
+            target_branch=task.target_branch,
+            approve=rr.approve,
+            summary=rr.summary_text,
+        )
 
     except Exception as e:
         log.exception(f"Task {task_id} failed")
         storage.update_status(
             task_id,
             "failed",
+            error=str(e),
+        )
+        _submit_notify(
+            project_url=task.project_url,
+            source_branch=task.source_branch,
+            target_branch=task.target_branch,
+            approve=False,
             error=str(e),
         )
         # 尝试发失败结论
