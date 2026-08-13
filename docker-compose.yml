@@ -74,6 +74,15 @@ services:
       - QUEUE_NOTICE_THRESHOLD=${QUEUE_NOTICE_THRESHOLD:-5}
       - GIT_COMMAND_TIMEOUT=${GIT_COMMAND_TIMEOUT:-300}
 
+      # --- 审核结果通知 (企业微信/飞书群机器人,可选) ---
+      # NOTIFY_ENABLED=true 时推送;NOTIFY_TYPE=feishu|wechat;
+      # NOTIFY_SIGN_SECRET 仅在机器人开启加签校验时填写
+      - NOTIFY_ENABLED=${NOTIFY_ENABLED:-false}
+      - NOTIFY_TYPE=${NOTIFY_TYPE:-wechat}
+      - NOTIFY_WEBHOOK_URL=${NOTIFY_WEBHOOK_URL}
+      - NOTIFY_SIGN_SECRET=${NOTIFY_SIGN_SECRET}
+      - NOTIFY_TIMEOUT_SEC=${NOTIFY_TIMEOUT_SEC:-10}
+
       # --- Webhook 配置 (可选，用于 GitLab 直接触发) ---
       # *必填* 如使用 webhook: 请在 .env 文件中配置
       # - WEBHOOK_SECRET=${WEBHOOK_SECRET}

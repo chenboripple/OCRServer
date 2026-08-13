@@ -23,6 +23,14 @@ _RETRIES = 2
 _RETRY_BASE_DELAY = 1.0  # 秒
 _MAX_SUMMARY_LEN = 500   # 汇总行最大长度(机器人消息长度受限)
 
+if config.NOTIFY_ENABLED and config.NOTIFY_WEBHOOK_URL:
+    log.info(
+        f"审核结果通知已启用: type={config.NOTIFY_TYPE}, "
+        f"sign={'on' if config.NOTIFY_SIGN_SECRET else 'off'}"
+    )
+else:
+    log.info("审核结果通知未启用(NOTIFY_ENABLED/NOTIFY_WEBHOOK_URL 未配置)")
+
 
 def _project_name(project_url: str) -> str:
     """从仓库 URL 派生 group/repo 形式的项目名。"""
