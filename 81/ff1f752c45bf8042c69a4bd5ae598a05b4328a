@@ -1,0 +1,39 @@
+tests/test_user_map.py
+  3a41e59e2660fa2c 1-104
+app/config.py
+  3a41e59e2660fa2c 120-128
+app/user_map.py
+  3a41e59e2660fa2c 1-119
+tests/test_notifier.py
+  3a41e59e2660fa2c 1-162
+app/notifier.py
+  3a41e59e2660fa2c 5,19,57-58,60-71,73-76,81,85-142,146-149,187-188,207-219,221
+.env.example
+  3a41e59e2660fa2c 96-100
+app/main.py
+  3a41e59e2660fa2c 23,51
+app/orchestrator.py
+  3a41e59e2660fa2c 23-34,36-37,48,114,141,281,297
+docker-compose.yml
+  3a41e59e2660fa2c 85-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "81ff1f752c45bf8042c69a4bd5ae598a05b4328a",
+  "prompts": {
+    "3a41e59e2660fa2c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "60ed7005-84c9-4c20-a76e-4d085c701103",
+        "model": "claude-opus"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 578,
+      "total_deletions": 70,
+      "accepted_lines": 530,
+      "overriden_lines": 0
+    }
+  }
+}
