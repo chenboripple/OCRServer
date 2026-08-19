@@ -117,6 +117,15 @@ FEISHU_TRIGGER_SPREADSHEET_TOKEN = _env(
 FEISHU_TRIGGER_SHEET_RANGE = _env("FEISHU_TRIGGER_SHEET_RANGE", "Sheet1!A:B")
 # 飞书触发规则缓存时长(分钟),避免每次 webhook 都请求飞书
 FEISHU_TRIGGER_CACHE_TTL_MIN = _env_int("FEISHU_TRIGGER_CACHE_TTL_MIN", 60)
+# 用户映射表(飞书卡片艾特 MR 作者用):GitLab 用户名 -> 飞书 open_id
+# 文档格式:第一列姓名(备注),第二列 GitLab 用户名,第三列飞书 open_id
+FEISHU_USER_MAP_SPREADSHEET_TOKEN = _env(
+    "FEISHU_USER_MAP_SPREADSHEET_TOKEN",
+    FEISHU_SPREADSHEET_TOKEN,
+)
+FEISHU_USER_MAP_SHEET_RANGE = _env("FEISHU_USER_MAP_SHEET_RANGE", "Sheet1!A:C")
+# 用户映射缓存时长(分钟),表格随时可维护,过期后自动重读
+FEISHU_USER_MAP_CACHE_TTL_MIN = _env_int("FEISHU_USER_MAP_CACHE_TTL_MIN", 60)
 
 # ── ocr 配置文件路径 ───────────────────────────────────────
 # ocr 的 ~/.opencodereview/config.json,程序启动时/每次 review 前可写入自定义规则

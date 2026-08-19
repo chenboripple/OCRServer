@@ -20,8 +20,21 @@ def submit_to_executor(task_id: str):
     executor.submit(do_review_async, task_id)
 
 
+def _mr_author(gl, project_id: str, mr_iid: str) -> str:
+    """查询 MR 作者的 GitLab 用户名(用于飞书卡片艾特)。失败返回空串,不影响通知。"""
+    if not notifier.needs_mr_author() or not gl:
+        return ""
+    try:
+        mr = gl.get_merge_request(project_id, mr_iid)
+        return (mr.get("author") or {}).get("username") or ""
+    except Exception as e:
+        log.warning(f"查询 MR !{mr_iid} 作者失败(通知将不艾特): {e}")
+        return ""
+
+
 def _submit_notify(*, project_url, source_branch, target_branch,
-                   approve, summary="", error=None):
+                   approve, summary="", error=None,
+                   gl=None, project_id="", mr_iid=""):
     """后台投递审核结果通知(失败不影响主流程)。"""
     try:
         executor.submit(
@@ -32,6 +45,7 @@ def _submit_notify(*, project_url, source_branch, target_branch,
             approve=approve,
             summary=summary,
             error=error,
+            mr_author=_mr_author(gl, project_id, mr_iid),
         )
     except Exception as e:
         log.warning(f"提交通知任务失败: {e}")
@@ -97,6 +111,7 @@ def do_review_sync(req: ReviewRequest) -> ReviewResponse:
             target_branch=req.target_branch,
             approve=rr.approve,
             summary=rr.summary_text,
+            gl=gl, project_id=req.project_id, mr_iid=req.mr_iid,
         )
 
         if gl:
@@ -123,6 +138,7 @@ def do_review_sync(req: ReviewRequest) -> ReviewResponse:
             target_branch=req.target_branch,
             approve=False,
             error=str(e),
+            gl=gl, project_id=req.project_id, mr_iid=req.mr_iid,
         )
         raise
     finally:
@@ -262,6 +278,7 @@ def do_review_async(task_id: str):
             target_branch=task.target_branch,
             approve=rr.approve,
             summary=rr.summary_text,
+            gl=gl, project_id=task.project_id, mr_iid=task.mr_iid,
         )
 
     except Exception as e:
@@ -277,6 +294,7 @@ def do_review_async(task_id: str):
             target_branch=task.target_branch,
             approve=False,
             error=str(e),
+            gl=gl, project_id=task.project_id, mr_iid=task.mr_iid,
         )
         # 尝试发失败结论
         if gl and task.pending_discussion_id and task.pending_note_id:

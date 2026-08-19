@@ -82,6 +82,16 @@ services:
       - NOTIFY_WEBHOOK_URL=${NOTIFY_WEBHOOK_URL}
       - NOTIFY_SIGN_SECRET=${NOTIFY_SIGN_SECRET}
       - NOTIFY_TIMEOUT_SEC=${NOTIFY_TIMEOUT_SEC:-10}
+      # 飞书卡片艾特 MR 作者:用户映射表(第一列姓名,第二列 GitLab 用户名,第三列 open_id)
+      # 依赖 FEISHU_ENABLED / FEISHU_APP_ID / FEISHU_APP_SECRET(见下方飞书集成)
+      - FEISHU_USER_MAP_SPREADSHEET_TOKEN=${FEISHU_USER_MAP_SPREADSHEET_TOKEN:-}
+      - FEISHU_USER_MAP_SHEET_RANGE=${FEISHU_USER_MAP_SHEET_RANGE:-Sheet1!A:C}
+      - FEISHU_USER_MAP_CACHE_TTL_MIN=${FEISHU_USER_MAP_CACHE_TTL_MIN:-60}
+
+      # --- 飞书集成 (电子表格:审核规则/触发规则/用户映射,可选) ---
+      - FEISHU_ENABLED=${FEISHU_ENABLED:-false}
+      - FEISHU_APP_ID=${FEISHU_APP_ID:-}
+      - FEISHU_APP_SECRET=${FEISHU_APP_SECRET:-}
 
       # --- Webhook 配置 (可选，用于 GitLab 直接触发) ---
       # *必填* 如使用 webhook: 请在 .env 文件中配置

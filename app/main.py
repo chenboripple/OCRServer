@@ -20,6 +20,7 @@ from . import config
 from . import orchestrator
 from . import repost
 from . import trigger_check
+from . import user_map
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,6 +48,7 @@ async def startup_event():
     """启动:恢复任务 + 清理孤儿 worktree + 启动补发轮询。"""
     orchestrator.startup_recovery()
     trigger_check.warmup_trigger_rules_cache()
+    user_map.warmup_user_map_cache()
     asyncio.create_task(repost.repost_worker())
 
 
