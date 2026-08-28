@@ -267,17 +267,22 @@ class ConsoleRepository:
                     SUM(CASE WHEN approve = 1 THEN 1 ELSE 0 END) AS approve_count,
                     SUM(CASE WHEN approve = 0 THEN 1 ELSE 0 END) AS reject_count
                 FROM review_task
-                """
+                WHERE created_at >= datetime('now', ?)
+                """,
+                (f"-{days} day",),
             ).fetchone()
 
             finding_totals = conn.execute(
                 """
                 SELECT
-                    LOWER(COALESCE(severity, 'unknown')) AS severity,
+                    LOWER(COALESCE(rf.severity, 'unknown')) AS severity,
                     COUNT(*) AS cnt
-                FROM review_finding
-                GROUP BY LOWER(COALESCE(severity, 'unknown'))
-                """
+                FROM review_finding rf
+                JOIN review_task rt ON rt.task_id = rf.task_id
+                WHERE rt.created_at >= datetime('now', ?)
+                GROUP BY LOWER(COALESCE(rf.severity, 'unknown'))
+                """,
+                (f"-{days} day",),
             ).fetchall()
 
             trends = conn.execute(
@@ -300,7 +305,14 @@ class ConsoleRepository:
             files_sum = 0
             elapsed_samples: list[float] = []
             stats_rows = conn.execute(
-                "SELECT stats_json FROM review_task WHERE status = 'done' AND stats_json IS NOT NULL"
+                                """
+                                SELECT stats_json
+                                FROM review_task
+                                WHERE status = 'done'
+                                    AND stats_json IS NOT NULL
+                                    AND created_at >= datetime('now', ?)
+                                """,
+                                (f"-{days} day",),
             ).fetchall()
             for s in stats_rows:
                 try:

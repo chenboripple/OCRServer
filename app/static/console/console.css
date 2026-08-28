@@ -258,6 +258,14 @@ td {
   text-overflow: clip;
 }
 
+.tasks-table td.task-summary > div {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tasks-table .col-time,
 .tasks-table .col-time > div {
   white-space: nowrap;
