@@ -1,0 +1,40 @@
+app/static/console/console.css
+  904e587efec52aeb 261-268
+tests/test_console.py
+  904e587efec52aeb 3,18,102-137
+app/storage/repositories/console_repository.py
+  904e587efec52aeb 270-272,278,280-285,308-315
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "73efba0cdb398e887e2e1e65dc45a28085bf71ef",
+  "prompts": {
+    "3a41e59e2660fa2c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "60ed7005-84c9-4c20-a76e-4d085c701103",
+        "model": "claude-opus"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 140,
+      "total_deletions": 0,
+      "accepted_lines": 140,
+      "overriden_lines": 0
+    },
+    "904e587efec52aeb": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "5580cf98-5c89-454f-8f80-40ed39f6ece5",
+        "model": "copilot/gpt-5.6-luna"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 65,
+      "total_deletions": 8,
+      "accepted_lines": 1184,
+      "overriden_lines": 0
+    }
+  }
+}
