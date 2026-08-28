@@ -1,0 +1,27 @@
+app/static/console/console.html
+  904e587efec52aeb 7,9,13-17,172-189
+app/static/console/console.js
+  904e587efec52aeb 39,286-299
+app/static/console/console.css
+  904e587efec52aeb 264-271,274-296
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "cf1a102224c56b28963117e3a5833dae71339a27",
+  "prompts": {
+    "904e587efec52aeb": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "5580cf98-5c89-454f-8f80-40ed39f6ece5",
+        "model": "copilot/gpt-5.6-luna"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 82,
+      "total_deletions": 16,
+      "accepted_lines": 1395,
+      "overriden_lines": 0
+    }
+  }
+}
