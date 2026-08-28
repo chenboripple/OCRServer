@@ -4,12 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OCR Server Console</title>
-  <link rel="stylesheet" href="console/assets/console.css" />
+  <link rel="stylesheet" href="console/assets/console.css?v=20260828-2" />
   <script defer src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-  <script defer src="console/assets/console.js"></script>
+  <script defer src="console/assets/console.js?v=20260828-2"></script>
 </head>
 <body>
   <div id="app">
+    <div
+      v-if="hoverTooltip"
+      class="task-tooltip"
+      :style="{ left: `${hoverTooltip.left}px`, top: `${hoverTooltip.top}px`, width: `${hoverTooltip.width}px` }"
+    >{{ hoverTooltip.text }}</div>
     <header class="top">
       <div class="brand">
         <span class="dot"></span>
@@ -164,8 +169,24 @@
                   <div>tokens: {{ t.stats.total_tokens || '-' }}</div>
                 </td>
                 <td class="col-summary task-summary" :title="[t.summary, t.error].filter(Boolean).join(' | ')">
-                  <div :title="t.summary || ''">{{ t.summary || '-' }}</div>
-                  <div v-if="t.error" class="muted mt-4" :title="t.error">{{ t.error }}</div>
+                  <div
+                    class="task-summary-item"
+                    :class="{ 'has-tooltip': t.summary }"
+                    :data-tooltip="t.summary || ''"
+                    @mouseenter="showTooltip($event, t.summary)"
+                    @mouseleave="hideTooltip"
+                  >
+                    <span class="task-summary-text">{{ t.summary || '-' }}</span>
+                  </div>
+                  <div
+                    v-if="t.error"
+                    class="task-summary-item muted mt-4 has-tooltip"
+                    :data-tooltip="t.error"
+                    @mouseenter="showTooltip($event, t.error)"
+                    @mouseleave="hideTooltip"
+                  >
+                    <span class="task-summary-text">{{ t.error }}</span>
+                  </div>
                 </td>
               </tr>
               <tr v-if="taskData.items.length === 0">

@@ -36,6 +36,7 @@ createApp({
       findingPageSize: 50,
       findingError: "",
       copiedTip: "",
+      hoverTooltip: null,
       timer: null
     };
   },
@@ -281,6 +282,20 @@ createApp({
       window.setTimeout(() => {
         this.copiedTip = "";
       }, 1800);
+    },
+    showTooltip(event, text) {
+      if (!text) {
+        return;
+      }
+      const rect = event.currentTarget.getBoundingClientRect();
+      const width = Math.min(520, window.innerWidth * 0.7);
+      const left = Math.min(Math.max(8, rect.left), window.innerWidth - width - 8);
+      const below = rect.bottom + 6;
+      const top = below + 240 <= window.innerHeight ? below : Math.max(8, rect.top - 246);
+      this.hoverTooltip = { text, left, top, width };
+    },
+    hideTooltip() {
+      this.hoverTooltip = null;
     },
     short(s) {
       if (!s) {
