@@ -12,12 +12,16 @@ import os
 import shutil
 import subprocess
 import uuid
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from . import config
 
 log = logging.getLogger("repo-cache")
+_project_locks: dict[str, threading.Lock] = {}
+_project_locks_guard = threading.Lock()
 
 
 def _redact_url(text: str) -> str:
@@ -52,6 +56,14 @@ class RepoCache:
 
     def _bare_path(self, project_id: str) -> Path:
         return self.cache_dir / f"{project_id}.git"
+
+    @contextmanager
+    def _project_lock(self, project_id: str):
+        """Serialize bare-repository mutation within this worker process."""
+        with _project_locks_guard:
+            lock = _project_locks.setdefault(project_id, threading.Lock())
+        with lock:
+            yield
 
     def _run_git(self, args: list[str], cwd: Path | None = None, env: dict | None = None) -> str:
         """跑 git 命令,失败抛 RepoError。"""
@@ -100,8 +112,15 @@ class RepoCache:
         bare = self._bare_path(project_id)
         if not bare.exists():
             log.info(f"首次 clone bare repo: project={project_id}, url={_redact_url(clone_url)}")
-            # 首次:clone bare
-            self._run_git(["clone", "--bare", clone_url, str(bare)], env=git_env)
+            # Clone into a unique sibling then atomically publish it; no caller
+            # can mistake a failed half-clone for a usable cache.
+            temporary = bare.with_name(f".{bare.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                self._run_git(["clone", "--bare", clone_url, str(temporary)], env=git_env)
+                temporary.replace(bare)
+            except Exception:
+                shutil.rmtree(temporary, ignore_errors=True)
+                raise
             log.info(f"clone 完成: {bare}")
         else:
             self._scrub_origin_credentials(bare)
@@ -205,16 +224,16 @@ class RepoCache:
         返回 (worktree_path, source_commit_sha)。
         ocr 在 worktree_path 上跑:ocr review --repo <wt> --from <target_sha> --to <source_commit>
         """
-        # 仅 prune 已失效的 worktree 注册(目录已不存在的);绝不删除其他活跃 worktree,
-        # 否则并发同项目审核会互相删掉对方正在跑 ocr 的 worktree(见审计 P1)。
-        bare = self._bare_path(project_id)
-        if bare.exists():
-            try:
-                self._run_git(["worktree", "prune"], cwd=bare)
-            except RepoError:
-                log.debug("git worktree prune 无变化")
-
-        self.fetch_branches(project_id, clone_url, [source_branch, target_branch], git_env=git_env)
-        wt_path, commit_sha = self.make_worktree(project_id, source_branch)
+        # Git mutates shared bare refs and worktree metadata. Keep this section
+        # atomic per project; OCR runs after the lock is released in its own WT.
+        with self._project_lock(project_id):
+            bare = self._bare_path(project_id)
+            if bare.exists():
+                try:
+                    self._run_git(["worktree", "prune"], cwd=bare)
+                except RepoError:
+                    log.debug("git worktree prune 无变化")
+            self.fetch_branches(project_id, clone_url, [source_branch, target_branch], git_env=git_env)
+            wt_path, commit_sha = self.make_worktree(project_id, source_branch)
         return wt_path, commit_sha
 

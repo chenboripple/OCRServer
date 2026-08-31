@@ -25,6 +25,14 @@ def test_create_duplicate_returns_existing(temp_storage):
     assert tid2 == tid1
 
 
+def test_new_webhook_task_supersedes_unstarted_mr_task(temp_storage):
+    old_id, _ = _make(commit_sha="old")
+    new_id, created = _make(commit_sha="new")
+    assert created is True
+    assert storage.get_task(old_id).status == "superseded"
+    assert storage.get_task(new_id).status == "queued"
+
+
 def test_get_task(temp_storage):
     tid, _ = _make()
     t = storage.get_task(tid)
@@ -52,7 +60,8 @@ def test_queued_count(temp_storage):
     assert storage.get_queued_count() == 1
     tid, _ = _make(commit_sha="sha2")
     storage.update_status(tid, "running")  # running 不计入 queued
-    assert storage.get_queued_count() == 1
+    # 新 commit 入队时已 supersede 上一个未开始任务。
+    assert storage.get_queued_count() == 0
 
 
 def test_record_webhook_event(temp_storage):

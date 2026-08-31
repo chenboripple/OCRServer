@@ -47,10 +47,16 @@ class ReviewError(Exception):
 
 def _ocr_env() -> dict:
     """构造 ocr 子进程环境:用环境变量驱动 LLM 配置 + 关闭自动更新。"""
-    env = dict(os.environ)
-    env["OCR_LLM_URL"] = config.OCR_LLM_URL
-    env["OCR_LLM_TOKEN"] = config.OCR_LLM_TOKEN
-    env["OCR_LLM_MODEL"] = config.OCR_LLM_MODEL
+    # Never inherit the service environment: it commonly contains GitLab,
+    # Feishu and notification credentials which OCR does not need.
+    env = {key: os.environ[key] for key in ("PATH", "HOME", "SystemRoot", "WINDIR", "SSL_CERT_FILE") if os.environ.get(key)}
+    for key, value in {
+        "OCR_LLM_URL": config.OCR_LLM_URL,
+        "OCR_LLM_TOKEN": config.OCR_LLM_TOKEN,
+        "OCR_LLM_MODEL": config.OCR_LLM_MODEL,
+    }.items():
+        if value:
+            env[key] = value
     if config.OCR_USE_ANTHROPIC:
         env["OCR_USE_ANTHROPIC"] = "true"
     if config.OCR_NO_UPDATE:
@@ -151,15 +157,26 @@ _PARTIAL_STATUSES = {"partial", "completed_with_errors"}
 
 def decide(result_json: dict) -> ReviewResult:
     """根据 ocr JSON 结果判定 approve/reject 并构造 ReviewResult。"""
+    if not isinstance(result_json, dict):
+        raise ReviewError("ocr JSON 顶层必须是对象")
     status = result_json.get("status", "")
-    comments = result_json.get("comments", []) or []
+    comments = result_json.get("comments", [])
     warnings = result_json.get("warnings", []) or []
     summary_obj = result_json.get("summary", {}) or {}
     session_id = result_json.get("session_id", "")
     message = result_json.get("message", "")
 
+    if not isinstance(status, str) or not status.strip():
+        return _invalid_result(result_json, "缺少或非法 status")
+    if not isinstance(comments, list) or not isinstance(summary_obj, dict) or not isinstance(warnings, list):
+        return _invalid_result(result_json, "comments、summary 或 warnings 的类型非法")
+    if any(not isinstance(comment, dict) for comment in comments):
+        return _invalid_result(result_json, "comments 中存在非对象条目")
+    unknown = sorted({str(c.get("severity") or "").lower() for c in comments} - {"critical", "high", "medium", "low"})
+    if unknown:
+        return _invalid_result(result_json, f"存在未知或缺失 severity: {', '.join(unknown)}")
     # status 异常 -> 不放行(避免假绿)
-    if status and status not in _SUCCESS_STATUSES:
+    if status not in _SUCCESS_STATUSES:
         if status in _PARTIAL_STATUSES:
             # 覆盖不完整:拦截转人工,但已有评论照常回写 MR
             failed_files = _extract_failed_files(result_json)
@@ -207,6 +224,10 @@ def decide(result_json: dict) -> ReviewResult:
             markdown_summary=_build_error_note(result_json),
         )
 
+    coverage = (result_json.get("manifest") or {}).get("coverage")
+    if coverage is not None and (not isinstance(coverage, dict) or coverage.get("failed") or coverage.get("unreviewed")):
+        return _invalid_result(result_json, "审核覆盖不完整")
+
     # 评论按严重程度降序排列(同 severity 内按 path、行号升序,稳定可预期),
     # 让严重问题在 GitLab 评论流里先展示、先回写
     comments.sort(key=lambda c: (c.get("path", ""), c.get("start_line") or c.get("end_line") or 0))
@@ -251,6 +272,21 @@ def decide(result_json: dict) -> ReviewResult:
         warnings=warnings,
         session_id=session_id,
         markdown_summary=_build_summary_note(result_json, approve, by_severity, by_category, blocking),
+    )
+
+
+def _invalid_result(result_json: dict, reason: str) -> ReviewResult:
+    """不可信或不完整的 OCR 输出统一拒绝，禁止以空结果误通过。"""
+    return ReviewResult(
+        approve=False,
+        status=str(result_json.get("status") or "invalid"),
+        summary_text=f"ocr 输出校验失败: {reason}",
+        reject_reason=f"ocr 输出不完整或不可信({reason}),请人工复核",
+        stats=result_json.get("summary") if isinstance(result_json.get("summary"), dict) else {},
+        comments=result_json.get("comments") if isinstance(result_json.get("comments"), list) else [],
+        warnings=result_json.get("warnings") if isinstance(result_json.get("warnings"), list) else [],
+        session_id=str(result_json.get("session_id") or ""),
+        markdown_summary=_build_error_note(result_json),
     )
 
 

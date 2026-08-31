@@ -62,6 +62,7 @@ services:
       - GITLAB_URL=${GITLAB_URL}
       - GITLAB_TOKEN=${GITLAB_TOKEN}
       - GITLAB_CLONE_USER=${GITLAB_CLONE_USER:-oauth2}
+      - GITLAB_REQUEST_TIMEOUT_SEC=${GITLAB_REQUEST_TIMEOUT_SEC:-30}
 
       # 跳过 SSL 验证 (内网 GitLab 无合法证书)
       - GIT_SSL_NO_VERIFY=1
@@ -71,6 +72,7 @@ services:
 
       # --- 存储 / 队列提示 ---
       - STORAGE_PATH=${STORAGE_PATH:-/var/ocr/db/ocr.db}
+      - MAX_QUEUED_REVIEWS=${MAX_QUEUED_REVIEWS:-100}
       - QUEUE_NOTICE_THRESHOLD=${QUEUE_NOTICE_THRESHOLD:-5}
       - GIT_COMMAND_TIMEOUT=${GIT_COMMAND_TIMEOUT:-300}
 

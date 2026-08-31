@@ -100,7 +100,7 @@ def test_post_note_server_error_returns_false(monkeypatch):
     c = _make_client(monkeypatch)
     c.max_retries = 0  # 不重试,避免 time.sleep 拖慢测试
 
-    def fail(req):
+    def fail(req, **kwargs):
         raise urllib.error.HTTPError(req.full_url, 500, "err", {}, BytesIO(b"{}"))
     monkeypatch.setattr(gitlab_client.urllib.request, "urlopen", fail)
     assert c.post_note("1", "2", "body") is False
@@ -140,7 +140,7 @@ def test_post_discussion_failure_returns_false(monkeypatch):
     c = _make_client(monkeypatch)
     c.max_retries = 0  # 不重试,避免 time.sleep 拖慢测试
 
-    def fail(req):
+    def fail(req, **kwargs):
         raise urllib.error.HTTPError(req.full_url, 400, "bad position", {}, BytesIO(b"{}"))
     monkeypatch.setattr(gitlab_client.urllib.request, "urlopen", fail)
     assert c.post_discussion("1", "2", "a.py", 5, "body", _DIFF_REFS) is False

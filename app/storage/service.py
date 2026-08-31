@@ -22,6 +22,9 @@ class ReviewService:
     def get_task(self, task_id: str) -> Optional[ReviewTask]:
         return self.task_repo.get(task_id)
 
+    def claim_task(self, task_id: str) -> Optional[ReviewTask]:
+        return self.task_repo.claim(task_id)
+
     def update_status(self, task_id: str, status: str, **fields) -> None:
         return self.task_repo.update_status(task_id, status, **fields)
 

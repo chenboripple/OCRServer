@@ -8,7 +8,7 @@ from . import notifier
 from . import reviewer
 from . import storage
 from .repost import post_to_gitlab
-from .rule_updater import apply_review_language, update_rules_from_feishu
+from .rule_updater import review_config_lock, update_config_for_review
 from .runtime import executor, repo_cache, get_gitlab
 from .schemas import ReviewRequest, ReviewResponse
 
@@ -90,10 +90,9 @@ def do_review_sync(req: ReviewRequest) -> ReviewResponse:
         log.info(f"工作树: {wt_path}, to={to_sha}, from={target_sha}")
 
         # 每次 review 前从飞书同步最新审核规则 + 写入输出语言设置
-        update_rules_from_feishu()
-        apply_review_language()
-
-        result_json = reviewer.run_ocr(wt_path, target_sha, to_sha)
+        with review_config_lock():
+            update_config_for_review()
+            result_json = reviewer.run_ocr(wt_path, target_sha, to_sha)
         rr = reviewer.decide(result_json)
         storage.save_review_artifacts(task_id, result_json, rr)
         storage.update_status(
@@ -117,6 +116,7 @@ def do_review_sync(req: ReviewRequest) -> ReviewResponse:
         if gl:
             try:
                 post_to_gitlab(gl, req, rr)
+                storage.update_status(task_id, "done", gitlab_posted=1)
             except Exception as e:
                 log.warning(f"GitLab 回写失败(不影响 approve 判定): {e}")
 
@@ -184,16 +184,12 @@ def _cancel_closed_mr(gl, task) -> None:
 
 def do_review_async(task_id: str):
     """异步 worker:跑 review + resolve discussion + 回写 inline + 落库结果。"""
-    task = storage.get_task(task_id)
+    task = storage.claim_task(task_id)
     if not task:
-        log.error(f"Task {task_id} not found, skipping")
-        return
-    if task.status not in ("queued", "running"):
-        log.info(f"Task {task_id} already in state {task.status}, skipping")
+        log.info(f"Task {task_id} was already claimed or is not queued, skipping")
         return
 
     log.info(f"Starting async review for task {task_id}, MR {task.mr_iid}")
-    storage.update_status(task_id, "running")
 
     gl = get_gitlab()
 
@@ -202,11 +198,35 @@ def do_review_async(task_id: str):
         _cancel_closed_mr(gl, task)
         return
 
+    # Webhooks are commit snapshots. Do not review or write findings for an
+    # older head once a newer push has reached the MR.
+    if gl and task.commit_sha:
+        try:
+            refs = gl.get_diff_refs(task.project_id, task.mr_iid)
+            if refs and refs.get("head_sha") and refs["head_sha"] != task.commit_sha:
+                storage.update_status(task_id, "superseded", summary="MR 已有更新提交，旧审核任务已跳过")
+                log.info("Task %s superseded by MR head %s", task_id, refs["head_sha"])
+                return
+        except Exception as e:
+            # A GitLab lookup outage must not silently skip the required review.
+            log.warning("无法校验 MR !%s 当前 head，保守继续审核: %s", task.mr_iid, e)
+
     clone_url = task.project_url
     git_env = None
     if gl:
         clone_url = gl.clone_url(task.project_url)
         git_env = gl.git_auth_env()
+
+        # External GitLab traffic belongs to the worker, never to the webhook
+        # response path. Persist IDs before the review so recovery can finish it.
+        if not task.pending_discussion_id:
+            try:
+                pending = gl.create_discussion(task.project_id, task.mr_iid, "⏳ 审核中，请稍候...")
+                storage.update_status(task_id, "running", pending_discussion_id=pending["id"], pending_note_id=pending["note_id"])
+                task.pending_discussion_id = pending["id"]
+                task.pending_note_id = pending["note_id"]
+            except Exception as e:
+                log.warning("Failed to create pending discussion: %s", e)
 
     wt_path = None
     try:
@@ -219,11 +239,11 @@ def do_review_async(task_id: str):
         log.info(f"Worktree: {wt_path}, to={to_sha}, from={target_sha}")
 
         # 每次 review 前从飞书同步最新审核规则 + 写入输出语言设置
-        update_rules_from_feishu()
-        apply_review_language()
-
-        # 2. 跑 ocr
-        result_json = reviewer.run_ocr(wt_path, target_sha, to_sha)
+        # The CLI reads a shared config file. Hold the lock until it has
+        # completed so another task cannot replace its rules mid-review.
+        with review_config_lock():
+            update_config_for_review()
+            result_json = reviewer.run_ocr(wt_path, target_sha, to_sha)
         rr = reviewer.decide(result_json)
         storage.save_review_artifacts(task_id, result_json, rr)
         log.info(f"Task {task_id} MR !{task.mr_iid} done: approve={rr.approve}, {rr.summary_text}")
@@ -319,6 +339,18 @@ def startup_recovery():
     log.info("Initializing storage...")
     storage.init_db()
 
+    # First remove worktrees left by the previous process. Only then submit
+    # recovered tasks, otherwise cleanup can delete a newly-created worktree.
+    log.info("Cleaning orphan worktrees...")
+    if config.WORK_DIR.exists():
+        for item in config.WORK_DIR.iterdir():
+            if item.is_dir():
+                try:
+                    shutil.rmtree(item, ignore_errors=True)
+                    log.info(f"Removed orphan worktree {item}")
+                except Exception as e:
+                    log.warning(f"Failed to remove {item}: {e}")
+
     # 恢复任务
     queued = storage.get_queued_tasks()
     if queued:
@@ -330,13 +362,3 @@ def startup_recovery():
             executor.submit(do_review_async, task.task_id)
             log.info(f"Resumed task {task.task_id} for MR {task.mr_iid}")
 
-    # 清理孤儿 worktree(简单版:直接删 WORK_DIR 下所有目录,后续 review 会重建)
-    log.info("Cleaning orphan worktrees...")
-    if config.WORK_DIR.exists():
-        for item in config.WORK_DIR.iterdir():
-            if item.is_dir():
-                try:
-                    shutil.rmtree(item, ignore_errors=True)
-                    log.info(f"Removed orphan worktree {item}")
-                except Exception as e:
-                    log.warning(f"Failed to remove {item}: {e}")

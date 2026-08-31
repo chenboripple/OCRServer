@@ -43,6 +43,9 @@ OCR_MAX_TOOLS = _env_int("OCR_MAX_TOOLS", 0)
 REQUEST_TIMEOUT_SEC = _env_int("REQUEST_TIMEOUT_SEC", 3600)
 # 同时处理的 MR 数(线程池大小)
 MAX_CONCURRENT_REVIEWS = _env_int("MAX_CONCURRENT_REVIEWS", 2)
+# ThreadPoolExecutor uses an unbounded internal queue. Keep the accepted backlog
+# bounded at the API boundary so an event burst cannot exhaust memory or disk.
+MAX_QUEUED_REVIEWS = _env_int("MAX_QUEUED_REVIEWS", 100)
 
 # ── LLM(ocr 配置) ─────────────────────────────────────────
 # 优先用环境变量驱动 ocr(ocr 兼容这些);也可用 ~/.opencodereview/config.json
@@ -62,6 +65,7 @@ REVIEW_LANGUAGE = _env("REVIEW_LANGUAGE", "Chinese")
 # ── GitLab ─────────────────────────────────────────────────
 GITLAB_URL = _env("GITLAB_URL", "")              # 如 https://gitlab.example.com
 GITLAB_TOKEN = _env("GITLAB_TOKEN", "")          # Project/Group Access Token,api scope
+GITLAB_REQUEST_TIMEOUT_SEC = _env_int("GITLAB_REQUEST_TIMEOUT_SEC", 30)
 # clone 用的 URL 模板:在仓库 URL 里注入 token,避免每次输密码
 # 例:https://oauth2:{token}@gitlab.example.com/group/project.git
 GITLABClone_AUTH_USER = _env("GITLAB_CLONE_USER", "oauth2")

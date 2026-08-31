@@ -79,6 +79,14 @@ class TaskRepository:
                     task_id, project_id, mr_iid, source_branch, target_branch, commit_sha,
                     project_url, "queued", source, pending_discussion_id, pending_note_id, created_at,
                 ))
+                # A newer webhook supersedes only work that has not started.
+                # Running work is checked against the live MR head by worker.
+                if source == "webhook":
+                    conn.execute(
+                        "UPDATE review_task SET status = 'superseded', finished_at = ? "
+                        "WHERE project_id = ? AND mr_iid = ? AND task_id <> ? AND status = 'queued'",
+                        (created_at, project_id, mr_iid, task_id),
+                    )
             except sqlite3.IntegrityError:
                 # 并发下另一事务已插入同 (project_id, mr_iid, commit_sha),回退为返回已有任务
                 existing = conn.execute(_find_sql, _find_params).fetchone()
@@ -153,6 +161,24 @@ class TaskRepository:
                 "SELECT * FROM review_task WHERE task_id = ?",
                 (task_id,),
             ).fetchone()
+            return _row_to_task(row) if row else None
+
+    def claim(self, task_id: str) -> Optional[ReviewTask]:
+        """Atomically transition a queued task to running and return its snapshot.
+
+        The conditional update is a SQLite compare-and-swap: duplicate executor
+        submissions and future multi-worker deployments cannot both run it.
+        """
+        now = datetime.datetime.now().isoformat()
+        with _db() as conn:
+            updated = conn.execute(
+                "UPDATE review_task SET status = 'running', started_at = ? "
+                "WHERE task_id = ? AND status = 'queued'",
+                (now, task_id),
+            ).rowcount
+            if not updated:
+                return None
+            row = conn.execute("SELECT * FROM review_task WHERE task_id = ?", (task_id,)).fetchone()
             return _row_to_task(row) if row else None
 
     def update_status(self, task_id: str, status: str, **fields):

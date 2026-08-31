@@ -27,6 +27,10 @@ def get_task(task_id):
     return service.get_task(task_id)
 
 
+def claim_task(task_id):
+    return service.claim_task(task_id)
+
+
 def update_status(task_id, status, **fields):
     return service.update_status(task_id, status, **fields)
 
@@ -59,7 +63,7 @@ __all__ = [
     "ReviewTask", "init_db",
     "task_repo", "webhook_repo", "service",
     "console_repo",
-    "create_task", "get_task", "update_status",
+    "create_task", "get_task", "claim_task", "update_status",
     "save_review_artifacts",
     "get_queued_tasks", "get_unposted_tasks", "get_queued_count",
     "record_repost_attempt",

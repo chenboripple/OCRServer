@@ -11,6 +11,7 @@ def app_client(tmp_path, monkeypatch):
     import app.webhooks
 
     monkeypatch.setattr(config, "STORAGE_PATH", tmp_path / "it.db")
+    monkeypatch.setattr(config, "WEBHOOK_SECRET", "test-webhook-secret")
     storage.init_db()
     # 不真正跑审核;webhook 处理层用到的依赖置为 no-op / None
     monkeypatch.setattr(app.webhooks, "submit_to_executor", lambda task_id: None)
@@ -21,7 +22,7 @@ def app_client(tmp_path, monkeypatch):
         yield client
 
 
-def _mr_payload(target="master", title="ocr fix", action="open", commit="sha1"):
+def _mr_payload(target="master", title="ocr fix", action="open", commit="a" * 40):
     return {
         "object_kind": "merge_request",
         "object_attributes": {
@@ -47,7 +48,7 @@ def test_webhook_accepted(app_client):
     r = app_client.post(
         "/gitlab/codeReview",
         json=_mr_payload(),
-        headers={"X-Gitlab-Event": "Merge Request Hook"},
+        headers={"X-Gitlab-Event": "Merge Request Hook", "X-Gitlab-Token": "test-webhook-secret"},
     )
     assert r.status_code == 200
     body = r.json()
@@ -59,7 +60,7 @@ def test_webhook_accepted(app_client):
 
 
 def test_webhook_missing_event_header_ignored(app_client):
-    r = app_client.post("/gitlab/codeReview", json=_mr_payload())
+    r = app_client.post("/gitlab/codeReview", json=_mr_payload(), headers={"X-Gitlab-Token": "test-webhook-secret"})
     assert r.status_code == 200
     assert r.json()["status"] == "ignored"
 
@@ -68,7 +69,7 @@ def test_webhook_skipped_for_non_matching_branch_and_title(app_client):
     r = app_client.post(
         "/gitlab/codeReview",
         json=_mr_payload(target="dev", title="just a fix"),
-        headers={"X-Gitlab-Event": "Merge Request Hook"},
+        headers={"X-Gitlab-Event": "Merge Request Hook", "X-Gitlab-Token": "test-webhook-secret"},
     )
     assert r.status_code == 200
     assert r.json()["status"] == "skipped"
@@ -95,22 +96,26 @@ def _post_review(client, monkeypatch, queued_count):
     r = client.post(
         "/gitlab/codeReview",
         json=_mr_payload(),
-        headers={"X-Gitlab-Event": "Merge Request Hook"},
+        headers={"X-Gitlab-Event": "Merge Request Hook", "X-Gitlab-Token": "test-webhook-secret"},
     )
     return r, fake
 
 
-def test_webhook_pending_message_when_queue_below_threshold(app_client, monkeypatch):
-    # 排队数未超过阈值(默认 5):首次评论为「审核中」
+def test_webhook_does_not_call_gitlab_before_response(app_client, monkeypatch):
+    # 外部 GitLab 调用由 worker 执行，webhook 只落库和入队。
     r, fake = _post_review(app_client, monkeypatch, queued_count=2)
     assert r.status_code == 200
-    assert fake.last_msg is not None
-    assert "审核中" in fake.last_msg
+    assert fake.last_msg is None
 
 
-def test_webhook_queued_message_when_queue_above_threshold(app_client, monkeypatch):
-    # 排队数超过阈值(默认 5):首次评论为「已进入待审核队列」
+def test_webhook_queue_limit_rejects(app_client, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config, "MAX_QUEUED_REVIEWS", 10)
     r, fake = _post_review(app_client, monkeypatch, queued_count=10)
-    assert r.status_code == 200
-    assert fake.last_msg is not None
-    assert "已进入待审核队列" in fake.last_msg
+    assert r.status_code == 429
+    assert fake.last_msg is None
+
+
+def test_webhook_without_secret_is_rejected(app_client):
+    r = app_client.post("/gitlab/codeReview", json=_mr_payload(), headers={"X-Gitlab-Event": "Merge Request Hook"})
+    assert r.status_code == 403

@@ -27,6 +27,26 @@ def test_approve_no_comments(blocking_severities):
     assert rr.reject_reason == ""
 
 
+def test_missing_status_rejects(blocking_severities):
+    rr = reviewer.decide({"comments": [], "summary": {}})
+    assert rr.approve is False
+    assert "校验失败" in rr.summary_text
+
+
+def test_unknown_severity_rejects(blocking_severities):
+    rr = reviewer.decide({"status": "success", "comments": [_comment("urgent")], "summary": {}})
+    assert rr.approve is False
+    assert "severity" in rr.reject_reason
+
+
+def test_ocr_environment_excludes_service_secrets(monkeypatch):
+    monkeypatch.setenv("GITLAB_TOKEN", "must-not-leak")
+    monkeypatch.setenv("NOTIFY_SIGN_SECRET", "must-not-leak")
+    env = reviewer._ocr_env()
+    assert "GITLAB_TOKEN" not in env
+    assert "NOTIFY_SIGN_SECRET" not in env
+
+
 def test_approve_only_non_blocking(blocking_severities):
     rr = reviewer.decide({"status": "success", "comments": [_comment("medium"), _comment("low")]})
     assert rr.approve is True

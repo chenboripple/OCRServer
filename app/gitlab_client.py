@@ -126,7 +126,7 @@ class GitLabClient:
         for attempt in range(self.max_retries + 1):
             req = urllib.request.Request(url, data=body, headers=headers, method=method)
             try:
-                with urllib.request.urlopen(req) as resp:
+                with urllib.request.urlopen(req, timeout=config.GITLAB_REQUEST_TIMEOUT_SEC) as resp:
                     return json.loads(resp.read().decode("utf-8"))
             except urllib.error.HTTPError as e:
                 err_body = e.read().decode("utf-8", errors="replace")

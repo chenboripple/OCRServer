@@ -4,6 +4,7 @@ import logging
 
 from fastapi import BackgroundTasks, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from . import config
 from . import storage
@@ -18,7 +19,7 @@ async def handle_code_review(request: Request, background_tasks: BackgroundTasks
     """处理 POST /gitlab/codeReview。"""
     # 1. 校验 webhook secret
     x_gitlab_token = request.headers.get("X-Gitlab-Token", "")
-    if config.WEBHOOK_SECRET and x_gitlab_token != config.WEBHOOK_SECRET:
+    if not config.WEBHOOK_SECRET or x_gitlab_token != config.WEBHOOK_SECRET:
         raise HTTPException(status_code=403, detail="Invalid token")
 
     # 2. 校验事件类型 (严格模式:必须为 Merge Request Hook,缺失头即拒绝)
@@ -59,6 +60,15 @@ async def handle_code_review(request: Request, background_tasks: BackgroundTasks
             status_code=400,
         )
 
+    # Reuse the public API's strict untrusted-input validation before any
+    # filesystem path or git command can be reached.
+    try:
+        from .schemas import ReviewRequest
+        ReviewRequest(project_id=project_id, project_url=project_url, mr_iid=mr_iid,
+                      source_branch=source_branch, target_branch=target_branch, commit_sha=commit_sha)
+    except ValidationError as e:
+        return JSONResponse(content={"status": "ignored", "reason": "Invalid review target", "detail": e.errors()}, status_code=400)
+
     # 6. 审核触发策略判断:飞书项目规则优先,未命中项目再走 master/release + 标题前缀兜底
     gl = get_gitlab()
     trigger_skip_reason = should_trigger_review(
@@ -75,8 +85,10 @@ async def handle_code_review(request: Request, background_tasks: BackgroundTasks
                 log.warning("跳过审核评论发送失败: %s", e)
         return JSONResponse(content={"status": "skipped", "reason": trigger_skip_reason})
 
-    # 7. 队列无上限:任务总会被接受并排队(不返回 503)。记录当前排队数用于选择提示文案。
+    # 7. Bounded queue: reject excess work before creating external side effects.
     queued_count = storage.get_queued_count()
+    if queued_count >= config.MAX_QUEUED_REVIEWS:
+        return JSONResponse(content={"status": "rejected", "reason": "Review queue is full"}, status_code=429)
 
     # 8. 落库任务(create_task 内部按 (project_id, mr_iid, commit_sha) 幂等去重)
     task_id, created = storage.create_task(
@@ -112,32 +124,8 @@ async def handle_code_review(request: Request, background_tasks: BackgroundTasks
                  task_id, mr_iid, source_branch, target_branch)
         return JSONResponse(content={"status": "duplicate", "task_id": task_id})
 
-    # 10. 新任务:发 pending discussion(失败不阻塞审核流程)
-    pending_discussion_id = None
-    pending_note_id = None
-    if gl:
-        # 排队较多(超过 QUEUE_NOTICE_THRESHOLD)时提示「已进入待审核队列」,否则「审核中」
-        if queued_count > config.QUEUE_NOTICE_THRESHOLD:
-            pending_msg = "⏳ 已进入待审核队列，请耐心等待..."
-        else:
-            pending_msg = "⏳ 审核中，请稍候..."
-        try:
-            pending = gl.create_discussion(project_id, mr_iid, pending_msg)
-            pending_discussion_id = pending["id"]
-            pending_note_id = pending["note_id"]
-        except Exception as e:
-            log.warning(f"Failed to create pending discussion: {e}")
-            # 即使 pending 发失败也继续,不阻塞审核流程,只是没了「开个讨论」的效果
-
-    # 回填 discussion id 到任务
-    if pending_discussion_id or pending_note_id:
-        storage.update_status(
-            task_id, "queued",
-            pending_discussion_id=pending_discussion_id,
-            pending_note_id=pending_note_id,
-        )
-
-    # 11. 投递异步任务
+    # 10. 投递异步任务. Pending discussion is deliberately created by the
+    # worker so webhook acknowledgement is independent of GitLab availability.
     background_tasks.add_task(submit_to_executor, task_id)
 
     return JSONResponse(content={"status": "accepted", "task_id": task_id})

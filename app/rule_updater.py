@@ -8,12 +8,22 @@
 """
 import json
 import logging
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 from . import config
 from .feishu_client import FeishuError, _get_client
 
 log = logging.getLogger("ocr-server.rule-updater")
+_config_lock = threading.RLock()
+
+
+@contextmanager
+def review_config_lock():
+    """Serialize use of the shared OCR config until a per-task config exists."""
+    with _config_lock:
+        yield
 
 
 def ensure_ocr_config_dir() -> Path:
@@ -91,21 +101,15 @@ def update_rules_from_feishu() -> None:
 
     try:
         rows = client.get_sheet_values(config.FEISHU_SPREADSHEET_TOKEN, config.FEISHU_SHEET_RANGE)
-        if not rows:
-            log.info("飞书电子表格内容为空,跳过规则更新")
-            return
-
         custom = _extract_rules_from_rows(rows)
-        if not custom:
-            log.info("飞书电子表格中未提取到规则,跳过更新")
-            return
 
-        cfg_path = ensure_ocr_config_dir()
-        existing = _load_existing_config(cfg_path)
-
-        # 合并:保留已有配置,更新 ruleConfig 字段
-        existing["ruleConfig"] = custom
-        _write_config(cfg_path, existing)
+        with _config_lock:
+            cfg_path = ensure_ocr_config_dir()
+            existing = _load_existing_config(cfg_path)
+            # A successful empty response is authoritative: do not leave stale
+            # customRules active. Errors above deliberately retain last-known-good.
+            existing["ruleConfig"] = custom
+            _write_config(cfg_path, existing)
 
         log.info("✅ 飞书规则已同步到 %s (%d 条规则)", cfg_path, len(custom.get("customRules", [])))
 
@@ -128,14 +132,22 @@ def apply_review_language() -> None:
         log.debug("REVIEW_LANGUAGE 未配置,跳过语言设置")
         return
 
-    cfg_path = ensure_ocr_config_dir()
     try:
-        existing = _load_existing_config(cfg_path)
-        if existing.get("language") == lang:
-            log.debug("ocr 配置 language 已是 %s,跳过", lang)
-            return
-        existing["language"] = lang
-        _write_config(cfg_path, existing)
-        log.info("✅ ocr 审核输出语言已设为: %s", lang)
+        with _config_lock:
+            cfg_path = ensure_ocr_config_dir()
+            existing = _load_existing_config(cfg_path)
+            if existing.get("language") == lang:
+                log.debug("ocr 配置 language 已是 %s,跳过", lang)
+                return
+            existing["language"] = lang
+            _write_config(cfg_path, existing)
+            log.info("✅ ocr 审核输出语言已设为: %s", lang)
     except Exception as e:
         log.warning("写入 ocr 输出语言失败(不影响审核流程): %s", e)
+
+
+def update_config_for_review() -> None:
+    """Update the shared OCR config as one serialized review-time operation."""
+    with _config_lock:
+        update_rules_from_feishu()
+        apply_review_language()
