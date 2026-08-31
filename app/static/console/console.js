@@ -102,7 +102,8 @@ createApp({
     },
     async loadDashboard() {
       try {
-        const resp = await fetch(this.apiUrl(`/api/console/dashboard?days=${this.dashboardDays}`));
+        const params = this.taskQueryParams();
+        const resp = await fetch(this.apiUrl(`/api/console/dashboard?${params.toString()}`));
         if (!resp.ok) {
           throw new Error(`HTTP ${resp.status}`);
         }
@@ -115,14 +116,9 @@ createApp({
       this.taskError = "";
       this.taskPage = page;
       try {
-        const params = new URLSearchParams();
+        const params = this.taskQueryParams();
         params.set("page", String(page));
         params.set("page_size", String(this.taskPageSize));
-        for (const [k, v] of Object.entries(this.filters)) {
-          if (v !== "") {
-            params.set(k, v);
-          }
-        }
         const resp = await fetch(this.apiUrl(`/api/console/tasks?${params.toString()}`));
         if (!resp.ok) {
           throw new Error(`HTTP ${resp.status}`);
@@ -147,6 +143,23 @@ createApp({
       }
       await this.loadTasks(page, true, true);
     },
+    taskQueryParams() {
+      const params = new URLSearchParams();
+      params.set("days", String(this.dashboardDays));
+      for (const [k, v] of Object.entries(this.filters)) {
+        if (v !== "") {
+          params.set(k, v);
+        }
+      }
+      return params;
+    },
+    async applyFilters() {
+      this.taskPage = 1;
+      this.selectedTaskId = "";
+      this.taskDetail = null;
+      this.findingData = { items: [], total: 0, page: 1, page_size: this.findingPageSize };
+      await this.reloadAll();
+    },
     resetFilters() {
       this.filters = {
         status: "",
@@ -157,10 +170,9 @@ createApp({
         q: ""
       };
       this.taskPage = 1;
-      this.selectedTaskId = "";
       this.findingFilters = { severity: "", category: "", path: "" };
       this.findingPage = 1;
-      this.reloadAll();
+      this.applyFilters();
     },
     async selectTask(taskId) {
       this.selectedTaskId = taskId;

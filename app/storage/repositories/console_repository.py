@@ -11,6 +11,7 @@ class ConsoleRepository:
         *,
         page: int,
         page_size: int,
+        days: int = 14,
         status: str | None = None,
         source: str | None = None,
         project_id: str | None = None,
@@ -18,32 +19,15 @@ class ConsoleRepository:
         approve: int | None = None,
         q: str | None = None,
     ) -> dict[str, Any]:
-        where = []
-        params: list[Any] = []
-
-        if status:
-            where.append("rt.status = ?")
-            params.append(status)
-        if source:
-            where.append("rt.source = ?")
-            params.append(source)
-        if project_id:
-            where.append("rt.project_id = ?")
-            params.append(project_id)
-        if mr_iid:
-            where.append("rt.mr_iid = ?")
-            params.append(mr_iid)
-        if approve is not None:
-            where.append("rt.approve = ?")
-            params.append(approve)
-        if q:
-            like = f"%{q}%"
-            where.append(
-                "(rt.project_id LIKE ? OR rt.mr_iid LIKE ? OR rt.source_branch LIKE ? OR rt.target_branch LIKE ? OR rt.summary LIKE ? OR rt.error LIKE ? OR rr.session_id LIKE ?)"
-            )
-            params.extend([like, like, like, like, like, like, like])
-
-        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        where_sql, params = self._task_where_clause(
+            days=days,
+            status=status,
+            source=source,
+            project_id=project_id,
+            mr_iid=mr_iid,
+            approve=approve,
+            q=q,
+        )
 
         with _db() as conn:
             total_row = conn.execute(
@@ -254,65 +238,87 @@ class ConsoleRepository:
                 "total": total,
             }
 
-    def dashboard(self, days: int = 14) -> dict[str, Any]:
+    def dashboard(
+        self,
+        days: int = 14,
+        *,
+        status: str | None = None,
+        source: str | None = None,
+        project_id: str | None = None,
+        mr_iid: str | None = None,
+        approve: int | None = None,
+        q: str | None = None,
+    ) -> dict[str, Any]:
+        where_sql, params = self._task_where_clause(
+            days=days,
+            status=status,
+            source=source,
+            project_id=project_id,
+            mr_iid=mr_iid,
+            approve=approve,
+            q=q,
+        )
         with _db() as conn:
             overview = conn.execute(
-                """
+                f"""
                 SELECT
                     COUNT(*) AS total,
-                    SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done_count,
-                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_count,
-                    SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) AS queued_count,
-                    SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_count,
-                    SUM(CASE WHEN approve = 1 THEN 1 ELSE 0 END) AS approve_count,
-                    SUM(CASE WHEN approve = 0 THEN 1 ELSE 0 END) AS reject_count
-                FROM review_task
-                WHERE created_at >= datetime('now', ?)
+                    SUM(CASE WHEN rt.status = 'done' THEN 1 ELSE 0 END) AS done_count,
+                    SUM(CASE WHEN rt.status = 'failed' THEN 1 ELSE 0 END) AS failed_count,
+                    SUM(CASE WHEN rt.status = 'queued' THEN 1 ELSE 0 END) AS queued_count,
+                    SUM(CASE WHEN rt.status = 'running' THEN 1 ELSE 0 END) AS running_count,
+                    SUM(CASE WHEN rt.approve = 1 THEN 1 ELSE 0 END) AS approve_count,
+                    SUM(CASE WHEN rt.approve = 0 THEN 1 ELSE 0 END) AS reject_count
+                FROM review_task rt
+                LEFT JOIN review_result rr ON rr.task_id = rt.task_id
+                {where_sql}
                 """,
-                (f"-{days} day",),
+                params,
             ).fetchone()
 
             finding_totals = conn.execute(
-                """
+                f"""
                 SELECT
                     LOWER(COALESCE(rf.severity, 'unknown')) AS severity,
                     COUNT(*) AS cnt
                 FROM review_finding rf
                 JOIN review_task rt ON rt.task_id = rf.task_id
-                WHERE rt.created_at >= datetime('now', ?)
+                LEFT JOIN review_result rr ON rr.task_id = rt.task_id
+                {where_sql}
                 GROUP BY LOWER(COALESCE(rf.severity, 'unknown'))
                 """,
-                (f"-{days} day",),
+                params,
             ).fetchall()
 
             trends = conn.execute(
-                """
+                f"""
                 SELECT
-                    substr(created_at, 1, 10) AS day,
+                    substr(rt.created_at, 1, 10) AS day,
                     COUNT(*) AS total,
-                    SUM(CASE WHEN approve = 1 THEN 1 ELSE 0 END) AS approve_count,
-                    SUM(CASE WHEN approve = 0 THEN 1 ELSE 0 END) AS reject_count,
-                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_count
-                FROM review_task
-                WHERE created_at >= datetime('now', ?)
-                GROUP BY substr(created_at, 1, 10)
+                    SUM(CASE WHEN rt.approve = 1 THEN 1 ELSE 0 END) AS approve_count,
+                    SUM(CASE WHEN rt.approve = 0 THEN 1 ELSE 0 END) AS reject_count,
+                    SUM(CASE WHEN rt.status = 'failed' THEN 1 ELSE 0 END) AS failed_count
+                FROM review_task rt
+                LEFT JOIN review_result rr ON rr.task_id = rt.task_id
+                {where_sql}
+                GROUP BY substr(rt.created_at, 1, 10)
                 ORDER BY day ASC
                 """,
-                (f"-{days} day",),
+                params,
             ).fetchall()
 
             token_sum = 0
             files_sum = 0
             elapsed_samples: list[float] = []
             stats_rows = conn.execute(
-                                """
-                                SELECT stats_json
-                                FROM review_task
-                                WHERE status = 'done'
-                                    AND stats_json IS NOT NULL
-                                    AND created_at >= datetime('now', ?)
-                                """,
-                                (f"-{days} day",),
+                f"""
+                SELECT rt.stats_json
+                FROM review_task rt
+                LEFT JOIN review_result rr ON rr.task_id = rt.task_id
+                {where_sql}{' AND' if where_sql else ' WHERE'} rt.status = 'done'
+                    AND rt.stats_json IS NOT NULL
+                """,
+                params,
             ).fetchall()
             for s in stats_rows:
                 try:
@@ -370,6 +376,44 @@ class ConsoleRepository:
                 },
                 "trend": trend_items,
             }
+
+    @staticmethod
+    def _task_where_clause(
+        *,
+        days: int,
+        status: str | None,
+        source: str | None,
+        project_id: str | None,
+        mr_iid: str | None,
+        approve: int | None,
+        q: str | None,
+    ) -> tuple[str, list[Any]]:
+        where = ["rt.created_at >= datetime('now', ?)"]
+        params: list[Any] = [f"-{days} day"]
+
+        if status:
+            where.append("rt.status = ?")
+            params.append(status)
+        if source:
+            where.append("rt.source = ?")
+            params.append(source)
+        if project_id:
+            where.append("rt.project_id = ?")
+            params.append(project_id)
+        if mr_iid:
+            where.append("rt.mr_iid = ?")
+            params.append(mr_iid)
+        if approve is not None:
+            where.append("rt.approve = ?")
+            params.append(approve)
+        if q:
+            like = f"%{q}%"
+            where.append(
+                "(rt.project_id LIKE ? OR rt.mr_iid LIKE ? OR rt.source_branch LIKE ? OR rt.target_branch LIKE ? OR rt.summary LIKE ? OR rt.error LIKE ? OR rr.session_id LIKE ?)"
+            )
+            params.extend([like, like, like, like, like, like, like])
+
+        return f"WHERE {' AND '.join(where)}", params
 
     @staticmethod
     def _finding_counts(conn, task_ids: list[str]) -> dict[str, dict[str, int]]:

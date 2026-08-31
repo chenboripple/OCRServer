@@ -130,8 +130,20 @@ def test_dashboard_days_filters_metrics(tmp_path, monkeypatch):
     with TestClient(main.app) as client:
         seven_days = client.get("/api/console/dashboard?days=7").json()
         fourteen_days = client.get("/api/console/dashboard?days=14").json()
+        filtered_dashboard = client.get(
+            "/api/console/dashboard?days=14&source=api&approve=true"
+        ).json()
+        filtered_tasks = client.get(
+            "/api/console/tasks?page=1&page_size=10&days=14&source=api&approve=true"
+        ).json()
+        recent_tasks = client.get("/api/console/tasks?page=1&page_size=10&days=7").json()
 
     assert seven_days["overview"]["total"] == 1
     assert fourteen_days["overview"]["total"] == 2
     assert seven_days["stats"]["total_tokens"] == 1200
     assert fourteen_days["stats"]["total_tokens"] == 1250
+    assert filtered_dashboard["overview"]["total"] == 1
+    assert filtered_dashboard["overview"]["approve_count"] == 1
+    assert filtered_tasks["total"] == filtered_dashboard["overview"]["total"]
+    assert filtered_tasks["items"][0]["task_id"] == old_task_id
+    assert recent_tasks["total"] == seven_days["overview"]["total"]

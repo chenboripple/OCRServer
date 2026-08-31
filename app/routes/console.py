@@ -34,6 +34,7 @@ def console_assets(asset_name: str):
 def list_tasks(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
+    days: int = Query(14, ge=1, le=90),
     status: str | None = None,
     source: str | None = None,
     project_id: str | None = None,
@@ -45,6 +46,7 @@ def list_tasks(
     return storage.console_repo.list_tasks(
         page=page,
         page_size=page_size,
+        days=days,
         status=status,
         source=source,
         project_id=project_id,
@@ -85,5 +87,22 @@ def task_findings(
 
 
 @router.get("/api/console/dashboard")
-def dashboard(days: int = Query(14, ge=1, le=90)):
-    return storage.console_repo.dashboard(days)
+def dashboard(
+    days: int = Query(14, ge=1, le=90),
+    status: str | None = None,
+    source: str | None = None,
+    project_id: str | None = None,
+    mr_iid: str | None = None,
+    approve: bool | None = None,
+    q: str | None = None,
+):
+    approve_int = None if approve is None else (1 if approve else 0)
+    return storage.console_repo.dashboard(
+        days=days,
+        status=status,
+        source=source,
+        project_id=project_id,
+        mr_iid=mr_iid,
+        approve=approve_int,
+        q=q,
+    )
