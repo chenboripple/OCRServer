@@ -45,6 +45,29 @@ def _project_name(project_url: str) -> str:
     return name or project_url
 
 
+def _merge_request_url(project_url: str, mr_iid: str) -> str:
+    """根据仓库地址生成 GitHub PR 或 GitLab MR 页面链接。"""
+    if not mr_iid:
+        return ""
+    try:
+        parsed = urlparse(project_url)
+    except Exception:
+        return ""
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+
+    project_path = parsed.path.rstrip("/")
+    if project_path.endswith(".git"):
+        project_path = project_path[:-4]
+    if not project_path:
+        return ""
+
+    base_url = f"{parsed.scheme}://{parsed.netloc}{project_path}"
+    if parsed.netloc.lower() == "github.com":
+        return f"{base_url}/pull/{mr_iid}"
+    return f"{base_url}/-/merge_requests/{mr_iid}"
+
+
 def _sign(timestamp: str, secret: str) -> str:
     """飞书/企微共用的 HMAC-SHA256 加签,返回 base64 字符串。"""
     string_to_sign = f"{timestamp}\n{secret}"
@@ -84,9 +107,9 @@ def _build_content(*, project_name, source_branch, target_branch,
 
 def _build_card(*, project_name, source_branch, target_branch,
                 approve, summary, error, open_id: str,
-                mr_author: str = "") -> dict:
+                mr_author: str = "", mr_url: str = "") -> dict:
     """
-    飞书 interactive 卡片:标题为审核结果,末尾艾特 MR 作者。
+    飞书 interactive 卡片:标题为审核结果,末尾附带 MR 链接。
 
     - 命中映射表: 真正艾特 (<at id=open_id>)
     - 未命中: 以 @GitLab用户名 文本展示(机器人无 open_id 无法真艾特),
@@ -117,6 +140,12 @@ def _build_card(*, project_name, source_branch, target_branch,
                     "\n(该 GitLab 账号未收录在飞书用户映射表,请补充)"
                 ),
             },
+        })
+    if mr_url:
+        elements.append({"tag": "hr"})
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": f"[查看 MR]({mr_url})"},
         })
     return {
         "header": {
@@ -185,7 +214,7 @@ def _check_response(ntype: str, resp: httpx.Response) -> str | None:
 
 def dispatch(*, project_url: str, source_branch: str, target_branch: str,
              approve: bool, summary: str = "", error: str | None = None,
-             mr_author: str = "") -> None:
+             mr_author: str = "", mr_iid: str = "") -> None:
     """发送审核结果通知。未配置或发送失败均不抛异常。"""
     if not config.NOTIFY_ENABLED or not config.NOTIFY_WEBHOOK_URL:
         return
@@ -215,6 +244,7 @@ def dispatch(*, project_url: str, source_branch: str, target_branch: str,
             error=error,
             open_id=resolve_open_id(mr_author),
             mr_author=mr_author,
+            mr_url=_merge_request_url(project_url, mr_iid),
         )
 
     try:

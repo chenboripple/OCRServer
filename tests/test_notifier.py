@@ -18,7 +18,7 @@ def feishu_notify(monkeypatch):
     monkeypatch.setattr(user_map, "user_map_configured", lambda: True)
 
 
-def _card(approve, error=None, open_id="", mr_author=""):
+def _card(approve, error=None, open_id="", mr_author="", mr_url=""):
     return notifier._build_card(
         project_name="group/repo",
         source_branch="feature-x",
@@ -28,6 +28,7 @@ def _card(approve, error=None, open_id="", mr_author=""):
         error=error,
         open_id=open_id,
         mr_author=mr_author,
+        mr_url=mr_url,
     )
 
 
@@ -70,6 +71,26 @@ def test_card_mapped_author_takes_priority(feishu_notify):
     at_md = card["elements"][-1]["text"]["content"]
     assert "<at id=ou_zhangsan></at>" in at_md
     assert "@zhangsan" not in at_md
+
+
+def test_card_ends_with_merge_request_link(feishu_notify):
+    mr_url = "https://github.com/group/repo/pull/42"
+    card = _card(False, open_id="ou_zhangsan", mr_url=mr_url)
+    assert card["elements"][-1]["text"]["content"] == f"[查看 MR]({mr_url})"
+    assert card["elements"][-2]["tag"] == "hr"
+    assert "<at id=ou_zhangsan></at>" in card["elements"][-3]["text"]["content"]
+
+
+@pytest.mark.parametrize(
+    ("project_url", "mr_iid", "expected"),
+    [
+        ("https://github.com/group/repo.git", "42", "https://github.com/group/repo/pull/42"),
+        ("https://gitlab.example.com/group/repo.git", "7", "https://gitlab.example.com/group/repo/-/merge_requests/7"),
+        ("https://github.com/group/repo", "", ""),
+    ],
+)
+def test_merge_request_url(project_url, mr_iid, expected):
+    assert notifier._merge_request_url(project_url, mr_iid) == expected
 
 
 def test_card_body_fields(feishu_notify):
@@ -131,9 +152,12 @@ def test_dispatch_sends_card(feishu_notify, monkeypatch):
         approve=False,
         summary="存在问题",
         mr_author="lisi",
+        mr_iid="7",
     )
     assert sent["body"]["msg_type"] == "interactive"
-    assert "<at id=ou_lisi></at>" in sent["body"]["card"]["elements"][-1]["text"]["content"]
+    elements = sent["body"]["card"]["elements"]
+    assert "<at id=ou_lisi></at>" in elements[-3]["text"]["content"]
+    assert elements[-1]["text"]["content"] == "[查看 MR](https://gitlab.example.com/group/repo/-/merge_requests/7)"
 
 
 def test_dispatch_unmapped_author(feishu_notify, monkeypatch):
@@ -157,6 +181,9 @@ def test_dispatch_unmapped_author(feishu_notify, monkeypatch):
         approve=True,
         summary="ok",
         mr_author="nobody",
+        mr_iid="8",
     )
-    at_md = sent["body"]["card"]["elements"][-1]["text"]["content"]
+    elements = sent["body"]["card"]["elements"]
+    at_md = elements[-3]["text"]["content"]
     assert "@nobody" in at_md and "<at id=" not in at_md
+    assert elements[-1]["text"]["content"] == "[查看 MR](https://gitlab.example.com/group/repo/-/merge_requests/8)"

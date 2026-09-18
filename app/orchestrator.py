@@ -46,6 +46,7 @@ def _submit_notify(*, project_url, source_branch, target_branch,
             summary=summary,
             error=error,
             mr_author=_mr_author(gl, project_id, mr_iid),
+            mr_iid=mr_iid,
         )
     except Exception as e:
         log.warning(f"提交通知任务失败: {e}")
