@@ -95,9 +95,9 @@ services:
       - FEISHU_APP_ID=${FEISHU_APP_ID:-}
       - FEISHU_APP_SECRET=${FEISHU_APP_SECRET:-}
 
-      # --- Webhook 配置 (可选，用于 GitLab 直接触发) ---
-      # *必填* 如使用 webhook: 请在 .env 文件中配置
-      # - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      # --- Webhook 配置 (用于 GitLab 直接触发;为空则 webhook 一律 403) ---
+      # 须与 GitLab Webhook 设置里的 Secret token 一致
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
 
       # 注: OCR_SERVER_HOST/PORT、REPO_CACHE_DIR、WORK_DIR 由 Dockerfile ENV 提供默认值
       # (与 volume 挂载/EXPOSE 绑定),此处不再重复;如需覆盖请在此添加 ${VAR} 引用。
