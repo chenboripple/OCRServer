@@ -146,6 +146,40 @@ class ProjectBind(BaseModel):
     channel_id: Optional[str] = Field(None, description="推送配置 id,null 解绑")
 
 
+# ── 配置页:项目标签 ──────────────────────────────────────
+
+_TAG_NAME_MAX_LEN = 32
+
+
+class TagCreate(BaseModel):
+    """新增标签(标签字典,提前维护)。"""
+    name: str = Field(..., description="标签名(唯一)")
+
+    @validator("name")
+    def validate_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value or len(value) > _TAG_NAME_MAX_LEN:
+            raise ValueError(f"标签名不能为空且不超过 {_TAG_NAME_MAX_LEN} 字")
+        return value
+
+
+class TagUpdate(BaseModel):
+    """重命名标签。"""
+    name: str = Field(..., description="新标签名(唯一)")
+
+    @validator("name")
+    def validate_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value or len(value) > _TAG_NAME_MAX_LEN:
+            raise ValueError(f"标签名不能为空且不超过 {_TAG_NAME_MAX_LEN} 字")
+        return value
+
+
+class ProjectTagsSet(BaseModel):
+    """整体设置项目标签(全量替换)。tag_ids 为空列表 = 清空标签。"""
+    tag_ids: list[str] = Field(default_factory=list, description="标签 id 列表")
+
+
 class ReviewResponse(BaseModel):
     approve: bool
     summary: str

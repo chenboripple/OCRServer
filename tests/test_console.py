@@ -299,3 +299,109 @@ def test_create_task_auto_registers_project_via_webhook_fixture(tmp_path, monkey
         assert projects["total"] == 1
         assert projects["items"][0]["project_id"] == "77"
         assert projects["items"][0]["project_url"] == "https://gitlab.example.com/g/q.git"
+
+
+# ── 配置页 API:项目标签 ──────────────────────────────────
+
+def _mk_tag(client, name):
+    resp = client.post("/api/console/tags", json={"name": name})
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def test_tag_crud_and_validation(tmp_path, monkeypatch):
+    with _config_client(tmp_path, monkeypatch) as client:
+        tag = _mk_tag(client, "核心系统")
+        assert tag["name"] == "核心系统"
+        assert tag["project_count"] == 0
+
+        # 同名 -> 409;空名/超长 -> 422
+        assert client.post("/api/console/tags", json={"name": "核心系统"}).status_code == 409
+        assert client.post("/api/console/tags", json={"name": "   "}).status_code == 422
+        assert client.post("/api/console/tags", json={"name": "x" * 33}).status_code == 422
+
+        # 重命名 + 撞名
+        resp = client.put(f"/api/console/tags/{tag['tag_id']}", json={"name": "核心"})
+        assert resp.status_code == 200 and resp.json()["name"] == "核心"
+        other = _mk_tag(client, "支付")
+        assert client.put(f"/api/console/tags/{tag['tag_id']}", json={"name": "支付"}).status_code == 409
+        # 改成自己的名字不报撞名
+        assert client.put(f"/api/console/tags/{tag['tag_id']}", json={"name": "核心"}).status_code == 200
+        assert client.put("/api/console/tags/nope", json={"name": "x"}).status_code == 404
+
+        # 列表按名排序,带 project_count
+        listing = client.get("/api/console/tags").json()
+        assert [t["name"] for t in listing["items"]] == sorted(
+            [t["name"] for t in listing["items"]]
+        )
+
+        # 删除:不存在 -> 404,存在 -> 204
+        assert client.delete(f"/api/console/tags/{other['tag_id']}").status_code == 204
+        assert client.delete(f"/api/console/tags/{other['tag_id']}").status_code == 404
+
+
+def test_project_tags_set_filter_and_cascade(tmp_path, monkeypatch):
+    with _config_client(tmp_path, monkeypatch) as client:
+        tag_core = _mk_tag(client, "核心")
+        tag_pay = _mk_tag(client, "支付")
+        client.post("/api/console/projects", json={"project_id": "42"})
+        client.post("/api/console/projects", json={"project_id": "43"})
+
+        # 打标签(全量替换语义):先打两个,再替换成一个
+        resp = client.put("/api/console/projects/42/tags", json={
+            "tag_ids": [tag_core["tag_id"], tag_pay["tag_id"]],
+        })
+        assert resp.status_code == 200
+        assert sorted(t["name"] for t in resp.json()["tags"]) == sorted(["核心", "支付"])
+        resp = client.put("/api/console/projects/42/tags", json={"tag_ids": [tag_core["tag_id"]]})
+        assert [t["name"] for t in resp.json()["tags"]] == ["核心"]
+        client.put("/api/console/projects/43/tags", json={"tag_ids": [tag_pay["tag_id"]]})
+
+        # 只能引用已维护的标签;项目不存在 -> 404
+        assert client.put("/api/console/projects/42/tags", json={"tag_ids": ["bogus"]}).status_code == 404
+        assert client.put("/api/console/projects/999/tags", json={"tag_ids": []}).status_code == 404
+
+        # 清单出参带标签;标签筛选(单/多,任一命中)
+        listing = client.get("/api/console/projects").json()
+        names = {p["project_id"]: sorted(t["name"] for t in p["tags"]) for p in listing["items"]}
+        assert names == {"42": ["核心"], "43": ["支付"]}
+        only_core = client.get(f"/api/console/projects?tag_id={tag_core['tag_id']}").json()
+        assert only_core["total"] == 1 and only_core["items"][0]["project_id"] == "42"
+        both = client.get(
+            f"/api/console/projects?tag_id={tag_core['tag_id']}&tag_id={tag_pay['tag_id']}"
+        ).json()
+        assert both["total"] == 2
+
+        # tag 列表的 project_count
+        counts = {t["name"]: t["project_count"] for t in client.get("/api/console/tags").json()["items"]}
+        assert counts == {"核心": 1, "支付": 1}
+
+        # 删除标签 -> 绑定级联解除
+        assert client.delete(f"/api/console/tags/{tag_pay['tag_id']}").status_code == 204
+        listing = client.get("/api/console/projects").json()
+        names = {p["project_id"]: [t["name"] for t in p["tags"]] for p in listing["items"]}
+        assert names == {"42": ["核心"], "43": []}
+
+        # 清空标签
+        resp = client.put("/api/console/projects/42/tags", json={"tag_ids": []})
+        assert resp.json()["tags"] == []
+
+
+def test_tasks_and_dashboard_filter_by_project_tag(tmp_path, monkeypatch):
+    with _config_client(tmp_path, monkeypatch) as client:
+        core_tag = _mk_tag(client, "核心")
+        from app import storage
+
+        for pid in ("42", "43"):
+            storage.create_task(
+                project_id=pid, mr_iid="1", source_branch="f", target_branch="main",
+                commit_sha=f"sha-{pid}", project_url="u", source="api",
+            )
+        client.put("/api/console/projects/42/tags", json={"tag_ids": [core_tag["tag_id"]]})
+
+        tasks = client.get(f"/api/console/tasks?tag_id={core_tag['tag_id']}").json()
+        assert tasks["total"] == 1 and tasks["items"][0]["project_id"] == "42"
+        dashboard = client.get(f"/api/console/dashboard?tag_id={core_tag['tag_id']}").json()
+        assert dashboard["overview"]["total"] == 1
+        # 无标签过滤时全部可见
+        assert client.get("/api/console/dashboard").json()["overview"]["total"] == 2

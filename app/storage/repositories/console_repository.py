@@ -18,6 +18,7 @@ class ConsoleRepository:
         mr_iid: str | None = None,
         approve: int | None = None,
         q: str | None = None,
+        tag_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         where_sql, params = self._task_where_clause(
             days=days,
@@ -27,6 +28,7 @@ class ConsoleRepository:
             mr_iid=mr_iid,
             approve=approve,
             q=q,
+            tag_ids=tag_ids,
         )
 
         with _db() as conn:
@@ -248,6 +250,7 @@ class ConsoleRepository:
         mr_iid: str | None = None,
         approve: int | None = None,
         q: str | None = None,
+        tag_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         where_sql, params = self._task_where_clause(
             days=days,
@@ -257,6 +260,7 @@ class ConsoleRepository:
             mr_iid=mr_iid,
             approve=approve,
             q=q,
+            tag_ids=tag_ids,
         )
         with _db() as conn:
             overview = conn.execute(
@@ -387,6 +391,7 @@ class ConsoleRepository:
         mr_iid: str | None,
         approve: int | None,
         q: str | None,
+        tag_ids: list[str] | None = None,
     ) -> tuple[str, list[Any]]:
         where = ["rt.created_at >= datetime('now', ?)"]
         params: list[Any] = [f"-{days} day"]
@@ -403,6 +408,13 @@ class ConsoleRepository:
         if mr_iid:
             where.append("rt.mr_iid = ?")
             params.append(mr_iid)
+        if tag_ids:
+            # 按项目标签筛任务:任务所属项目命中任一标签即返回(OR 语义)
+            placeholders = ",".join("?" for _ in tag_ids)
+            where.append(
+                f"rt.project_id IN (SELECT project_id FROM project_tag_rel WHERE tag_id IN ({placeholders}))"
+            )
+            params.extend(tag_ids)
         if approve is not None:
             where.append("rt.approve = ?")
             params.append(approve)

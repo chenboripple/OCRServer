@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OCR Server Console</title>
-  <link rel="stylesheet" href="console/assets/console.css?v=20260923-1" />
+  <link rel="stylesheet" href="console/assets/console.css?v=20260924-1" />
   <script defer src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-  <script defer src="console/assets/console.js?v=20260923-1"></script>
+  <script defer src="console/assets/console.js?v=20260924-1"></script>
 </head>
 <body>
   <div id="app">
@@ -87,6 +87,14 @@
           <div class="field">
             <label>Project ID</label>
             <input v-model.trim="filters.project_id" placeholder="project id" />
+          </div>
+
+          <div class="field">
+            <label>标签</label>
+            <select v-model="filters.tag_id">
+              <option value="">All</option>
+              <option v-for="t in tags" :key="t.tag_id" :value="t.tag_id">{{ t.name }}</option>
+            </select>
           </div>
 
           <div class="field">
@@ -417,6 +425,45 @@
 
       <section class="card">
         <div class="section-title">
+          <span>项目标签</span>
+          <span class="muted">{{ tags.length }} 个标签</span>
+        </div>
+        <p class="muted config-hint">
+          标签需先在这里维护,再到下方项目清单给项目打标签;审核看板与项目清单均可按标签筛选。
+        </p>
+
+        <form class="tag-add-form" @submit.prevent="submitTag">
+          <input v-model.trim="tagForm.name" placeholder="新标签名称,如:核心系统 / 支付 / 前端" maxlength="32" />
+          <button type="submit" :disabled="tagSaving">{{ tagSaving ? '添加中...' : '添加标签' }}</button>
+        </form>
+        <div v-if="tagError" class="err tag-error">{{ tagError }}</div>
+
+        <div class="tag-manage-list">
+          <div class="tag-manage-item" v-for="t in tags" :key="t.tag_id">
+            <template v-if="tagEditId === t.tag_id">
+              <input
+                class="tag-edit-input"
+                v-model.trim="tagEditName"
+                maxlength="32"
+                @keyup.enter="saveTagEdit(t)"
+                @keyup.esc="cancelTagEdit"
+              />
+              <button class="btn-sm" @click="saveTagEdit(t)" :disabled="tagSaving">保存</button>
+              <button class="ghost btn-sm" @click="cancelTagEdit">取消</button>
+            </template>
+            <template v-else>
+              <span class="tag-chip" :class="tagColorClass(t.name)">{{ t.name }}</span>
+              <span class="muted tag-count">{{ t.project_count }} 个项目</span>
+              <button class="ghost btn-sm" @click="startTagEdit(t)">重命名</button>
+              <button class="ghost btn-sm btn-danger" @click="deleteTag(t)">删除</button>
+            </template>
+          </div>
+          <div class="muted" v-if="tags.length === 0">暂无标签,先在上方添加。</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-title">
           <span>项目清单</span>
           <span class="muted">{{ projectData.total }} total</span>
         </div>
@@ -429,6 +476,20 @@
           <div class="field">
             <label>搜索</label>
             <input v-model.trim="projectQuery" @keyup.enter="loadProjects(1)" placeholder="project id / url" />
+          </div>
+          <div class="field" v-if="tags.length">
+            <label>按标签筛选(任一命中)</label>
+            <div class="tag-filter-chips">
+              <button
+                type="button"
+                class="tag-chip tag-toggle"
+                v-for="t in tags"
+                :key="t.tag_id"
+                :class="[tagColorClass(t.name), { selected: projectTagFilter.includes(t.tag_id) }]"
+                @click="toggleProjectTagFilter(t.tag_id)"
+              >{{ t.name }}</button>
+              <button v-if="projectTagFilter.length" type="button" class="ghost btn-sm" @click="clearProjectTagFilter">清除</button>
+            </div>
           </div>
           <div class="field">
             <label>Actions</label>
@@ -469,14 +530,39 @@
               <tr>
                 <th>Project ID</th>
                 <th>项目 URL</th>
+                <th class="col-project-tags">标签</th>
                 <th>推送配置</th>
                 <th>更新时间</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="p in projectData.items" :key="p.project_id">
+              <tr v-for="p in projectData.items" :key="p.project_id" :class="{ 'tag-editing-row': editingTagsFor === p.project_id }">
                 <td>{{ p.project_id }}</td>
                 <td><span class="project-url">{{ p.project_url || '-' }}</span></td>
+                <td class="col-project-tags">
+                  <div v-if="editingTagsFor === p.project_id" class="tag-editor">
+                    <template v-if="tags.length">
+                      <button
+                        type="button"
+                        class="tag-chip tag-toggle"
+                        v-for="t in tags"
+                        :key="t.tag_id"
+                        :class="[tagColorClass(t.name), { selected: tagEditSelection.includes(t.tag_id) }]"
+                        @click="toggleTagEditSelection(t.tag_id)"
+                      >{{ t.name }}</button>
+                    </template>
+                    <span v-else class="muted">暂无标签可选,请先在上方维护。</span>
+                    <div class="inline-actions tag-editor-actions">
+                      <button class="btn-sm" @click="saveProjectTags(p)" :disabled="projectTagsSaving">{{ projectTagsSaving ? '保存中...' : '保存' }}</button>
+                      <button class="ghost btn-sm" @click="cancelProjectTagsEdit">取消</button>
+                    </div>
+                  </div>
+                  <div v-else class="project-tags">
+                    <span v-for="tg in p.tags" :key="tg.tag_id" class="tag-chip" :class="tagColorClass(tg.name)">{{ tg.name }}</span>
+                    <span v-if="!p.tags || !p.tags.length" class="muted">-</span>
+                    <button class="ghost btn-sm" @click="startProjectTagsEdit(p)">{{ (p.tags && p.tags.length) ? '编辑' : '打标签' }}</button>
+                  </div>
+                </td>
                 <td>
                   <select class="bind-select" :value="p.channel ? p.channel.channel_id : ''" @change="bindProject(p, $event.target.value)">
                     <option value="">未绑定(使用全局配置)</option>
@@ -486,7 +572,7 @@
                 <td>{{ compactTime(p.updated_at) }}</td>
               </tr>
               <tr v-if="projectData.items.length === 0">
-                <td colspan="4" class="muted">暂无项目。</td>
+                <td colspan="5" class="muted">暂无项目。</td>
               </tr>
             </tbody>
           </table>

@@ -210,3 +210,24 @@ def init_db():
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_notify_channel_name ON notify_channel(name)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_review_project_channel ON review_project(channel_id)")
+        # 项目标签:标签字典(提前维护),项目与标签多对多绑定。
+        # 删除标签时绑定关系级联清除;标签名唯一。
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS project_tag (
+                tag_id      TEXT PRIMARY KEY,
+                name        TEXT NOT NULL UNIQUE,
+                created_at  TEXT NOT NULL,
+                updated_at  TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS project_tag_rel (
+                project_id  TEXT NOT NULL,
+                tag_id      TEXT NOT NULL,
+                created_at  TEXT NOT NULL,
+                PRIMARY KEY (project_id, tag_id),
+                FOREIGN KEY(project_id) REFERENCES review_project(project_id) ON DELETE CASCADE,
+                FOREIGN KEY(tag_id) REFERENCES project_tag(tag_id) ON DELETE CASCADE
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_project_tag_rel_tag ON project_tag_rel(tag_id)")

@@ -46,14 +46,31 @@ class ProjectRepository:
             ).fetchone()
             return _row_to_project(row) if row else None
 
-    def list(self, *, page: int = 1, page_size: int = 50, q: str | None = None) -> dict:
-        """分页列出项目,q 模糊匹配 project_id / project_url。"""
+    def list(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        q: str | None = None,
+        tag_ids: Optional[list[str]] = None,
+    ) -> dict:
+        """分页列出项目。q 模糊匹配 project_id / project_url;
+        tag_ids 任一命中即返回(OR 语义)。出参带项目标签列表。"""
         where = ""
         params: list = []
+        conditions = []
         if q:
-            where = "WHERE p.project_id LIKE ? OR p.project_url LIKE ?"
             like = f"%{q}%"
-            params = [like, like]
+            conditions.append("(p.project_id LIKE ? OR p.project_url LIKE ?)")
+            params += [like, like]
+        if tag_ids:
+            placeholders = ",".join("?" for _ in tag_ids)
+            conditions.append(
+                f"p.project_id IN (SELECT project_id FROM project_tag_rel WHERE tag_id IN ({placeholders}))"
+            )
+            params += list(tag_ids)
+        if conditions:
+            where = "WHERE " + " AND ".join(conditions)
         with _db() as conn:
             total = conn.execute(
                 f"SELECT COUNT(*) AS cnt FROM review_project p {where}", params
@@ -69,6 +86,8 @@ class ProjectRepository:
                 """,
                 params + [page_size, (page - 1) * page_size],
             ).fetchall()
+            from .. import tag_repo
+            tag_map = tag_repo.project_tag_map([row["project_id"] for row in rows])
             items = [
                 {
                     "project_id": row["project_id"],
@@ -77,6 +96,7 @@ class ProjectRepository:
                         {"channel_id": row["channel_id"], "name": row["channel_name"], "type": row["channel_type"]}
                         if row["channel_id"] else None
                     ),
+                    "tags": tag_map.get(row["project_id"], []),
                     "created_at": row["created_at"],
                     "updated_at": row["updated_at"],
                 }

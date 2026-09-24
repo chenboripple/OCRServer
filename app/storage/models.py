@@ -26,6 +26,15 @@ class ReviewProject:
 
 
 @dataclass
+class ProjectTag:
+    """项目标签:提前维护的标签字典,项目与标签多对多绑定。"""
+    tag_id: str
+    name: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+@dataclass
 class ReviewTask:
     task_id: str
     project_id: str

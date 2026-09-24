@@ -19,7 +19,8 @@ createApp({
         project_id: "",
         mr_iid: "",
         approve: "",
-        q: ""
+        q: "",
+        tag_id: ""
       },
       taskData: { items: [], total: 0, page: 1, page_size: 20 },
       taskPage: 1,
@@ -47,6 +48,17 @@ createApp({
       channelSaving: false,
       channelTesting: "",
       channelTestResult: null,
+      // ── 配置页:项目标签 ──
+      tags: [],
+      tagForm: { name: "" },
+      tagSaving: false,
+      tagError: "",
+      tagEditId: "",
+      tagEditName: "",
+      projectTagFilter: [],      // 项目清单标签筛选(可多选,任一命中)
+      editingTagsFor: "",        // 正在编辑标签的 project_id
+      tagEditSelection: [],      // 编辑中的已选 tag_id
+      projectTagsSaving: false,
       // ── 配置页:项目清单 ──
       projectData: { items: [], total: 0, page: 1, page_size: 50 },
       projectPage: 1,
@@ -71,6 +83,8 @@ createApp({
   },
   mounted() {
     this.applyStateFromUrl();
+    // 标签两个 tab 都要用(看板筛选下拉 + 配置页管理/打标),无条件加载
+    this.loadTags();
     if (this.activeTab === "config") {
       this.loadConfig();
     } else {
@@ -95,7 +109,7 @@ createApp({
       }
     },
     async loadConfig() {
-      await Promise.all([this.loadChannels(), this.loadProjects(1)]);
+      await Promise.all([this.loadChannels(), this.loadProjects(1), this.loadTags()]);
       this.configLoaded = true;
     },
     async loadChannels() {
@@ -119,6 +133,9 @@ createApp({
         params.set("page_size", String(this.projectPageSize));
         if (this.projectQuery) {
           params.set("q", this.projectQuery);
+        }
+        for (const tagId of this.projectTagFilter) {
+          params.append("tag_id", tagId);
         }
         const resp = await fetch(this.apiUrl(`/api/console/projects?${params.toString()}`));
         if (!resp.ok) {
@@ -227,6 +244,160 @@ createApp({
       window.setTimeout(() => {
         this.channelTestResult = null;
       }, 5000);
+    },
+    // ── 配置页:项目标签 ────────────────────────────────
+    async loadTags() {
+      try {
+        const resp = await fetch(this.apiUrl("/api/console/tags"));
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+        this.tags = data.items || [];
+      } catch (e) {
+        this.tagError = `加载标签失败: ${String(e)}`;
+      }
+    },
+    async submitTag() {
+      this.tagError = "";
+      const name = this.tagForm.name;
+      if (!name) {
+        this.tagError = "标签名必填";
+        return;
+      }
+      this.tagSaving = true;
+      try {
+        const resp = await fetch(this.apiUrl("/api/console/tags"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name })
+        });
+        if (!resp.ok) {
+          const detail = await resp.json().catch(() => ({}));
+          throw new Error(detail.detail || `HTTP ${resp.status}`);
+        }
+        this.tagForm.name = "";
+        await this.loadTags();
+      } catch (e) {
+        this.tagError = `添加标签失败: ${String(e)}`;
+      } finally {
+        this.tagSaving = false;
+      }
+    },
+    startTagEdit(t) {
+      this.tagEditId = t.tag_id;
+      this.tagEditName = t.name;
+      this.tagError = "";
+    },
+    cancelTagEdit() {
+      this.tagEditId = "";
+      this.tagEditName = "";
+      this.tagError = "";
+    },
+    async saveTagEdit() {
+      this.tagError = "";
+      if (!this.tagEditName) {
+        this.tagError = "标签名必填";
+        return;
+      }
+      this.tagSaving = true;
+      try {
+        const resp = await fetch(this.apiUrl(`/api/console/tags/${encodeURIComponent(this.tagEditId)}`), {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: this.tagEditName })
+        });
+        if (!resp.ok) {
+          const detail = await resp.json().catch(() => ({}));
+          throw new Error(detail.detail || `HTTP ${resp.status}`);
+        }
+        this.cancelTagEdit();
+        await this.loadTags();
+        // 标签名变了,项目清单里的 chip 也要刷新
+        await this.loadProjects(this.projectPage);
+      } catch (e) {
+        this.tagError = `重命名失败: ${String(e)}`;
+      } finally {
+        this.tagSaving = false;
+      }
+    },
+    async deleteTag(t) {
+      const bound = t.project_count > 0 ? `该标签已用于 ${t.project_count} 个项目,删除后同步解除绑定。` : "";
+      if (!window.confirm(`确定删除标签「${t.name}」?${bound}`)) {
+        return;
+      }
+      this.tagError = "";
+      try {
+        const resp = await fetch(this.apiUrl(`/api/console/tags/${encodeURIComponent(t.tag_id)}`), { method: "DELETE" });
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        this.projectTagFilter = this.projectTagFilter.filter((id) => id !== t.tag_id);
+        if (this.filters.tag_id === t.tag_id) {
+          this.filters.tag_id = "";
+        }
+        await this.loadTags();
+        await this.loadProjects(this.projectPage);
+      } catch (e) {
+        this.tagError = `删除失败: ${String(e)}`;
+      }
+    },
+    toggleProjectTagFilter(tagId) {
+      if (this.projectTagFilter.includes(tagId)) {
+        this.projectTagFilter = this.projectTagFilter.filter((id) => id !== tagId);
+      } else {
+        this.projectTagFilter = [...this.projectTagFilter, tagId];
+      }
+      this.loadProjects(1);
+    },
+    clearProjectTagFilter() {
+      this.projectTagFilter = [];
+      this.loadProjects(1);
+    },
+    startProjectTagsEdit(p) {
+      this.editingTagsFor = p.project_id;
+      this.tagEditSelection = (p.tags || []).map((t) => t.tag_id);
+      this.projectBindError = "";
+    },
+    cancelProjectTagsEdit() {
+      this.editingTagsFor = "";
+      this.tagEditSelection = [];
+    },
+    toggleTagEditSelection(tagId) {
+      if (this.tagEditSelection.includes(tagId)) {
+        this.tagEditSelection = this.tagEditSelection.filter((id) => id !== tagId);
+      } else {
+        this.tagEditSelection = [...this.tagEditSelection, tagId];
+      }
+    },
+    async saveProjectTags(p) {
+      this.projectBindError = "";
+      this.projectTagsSaving = true;
+      try {
+        const resp = await fetch(this.apiUrl(`/api/console/projects/${encodeURIComponent(p.project_id)}/tags`), {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tag_ids: this.tagEditSelection })
+        });
+        if (!resp.ok) {
+          const detail = await resp.json().catch(() => ({}));
+          throw new Error(detail.detail || `HTTP ${resp.status}`);
+        }
+        this.cancelProjectTagsEdit();
+        await this.loadProjects(this.projectPage);
+      } catch (e) {
+        this.projectBindError = `保存标签失败: ${String(e)}`;
+      } finally {
+        this.projectTagsSaving = false;
+      }
+    },
+    tagColorClass(name) {
+      let hash = 0;
+      const s = String(name || "");
+      for (let i = 0; i < s.length; i++) {
+        hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+      }
+      return `tc-${hash % 5}`;
     },
     async submitProject() {
       this.projectError = "";
@@ -392,7 +563,8 @@ createApp({
         project_id: "",
         mr_iid: "",
         approve: "",
-        q: ""
+        q: "",
+        tag_id: ""
       };
       this.taskPage = 1;
       this.findingFilters = { severity: "", category: "", path: "" };
@@ -496,6 +668,7 @@ createApp({
       this.filters.mr_iid = read("mr_iid");
       this.filters.approve = read("approve");
       this.filters.q = read("q");
+      this.filters.tag_id = read("tag_id");
 
       const taskPage = Number(read("task_page", "1"));
       this.taskPage = Number.isFinite(taskPage) && taskPage > 0 ? taskPage : 1;
