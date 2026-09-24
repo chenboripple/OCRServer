@@ -1,0 +1,36 @@
+docker-compose.yml
+  1caeffd3e80450f5 98-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "585e22e6ed0c3d4c89bd4c4859ed765c786e553b",
+  "prompts": {
+    "1caeffd3e80450f5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8f581463-138c-470b-b474-aca7953f98f4",
+        "model": "claude-opus"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 3,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    },
+    "370ef3439e36e473": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cefba412-221a-4de1-9ce6-4817493d17c4",
+        "model": "claude-opus"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    }
+  }
+}
