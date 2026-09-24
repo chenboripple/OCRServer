@@ -1,0 +1,25 @@
+app/static/console/console.html
+  1caeffd3e80450f5 401,411-414
+app/static/console/console.css
+  1caeffd3e80450f5 759-763
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "a257834985dbd8192fa5f9a2e3bcafc4538f71e5",
+  "prompts": {
+    "1caeffd3e80450f5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8f581463-138c-470b-b474-aca7953f98f4",
+        "model": "claude-opus"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 10,
+      "total_deletions": 2,
+      "accepted_lines": 942,
+      "overriden_lines": 0
+    }
+  }
+}
