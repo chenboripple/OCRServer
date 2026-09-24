@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OCR Server Console</title>
-  <link rel="stylesheet" href="console/assets/console.css?v=20260831-1" />
+  <link rel="stylesheet" href="console/assets/console.css?v=20260923-1" />
   <script defer src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-  <script defer src="console/assets/console.js?v=20260831-1"></script>
+  <script defer src="console/assets/console.js?v=20260923-1"></script>
 </head>
 <body>
   <div id="app">
@@ -20,13 +20,19 @@
         <span class="dot"></span>
         <div>
           <h1>OCR Review Console</h1>
-          <div class="muted">Vue3 read-only portal for requests and analysis results</div>
+          <div class="muted">Vue3 portal for requests, analysis results and push config</div>
         </div>
       </div>
       <div class="muted top-meta">Last refresh: {{ formatTime(lastRefreshAt) }}</div>
     </header>
 
+    <nav class="tabs">
+      <button class="tab" :class="{ active: activeTab === 'review' }" @click="switchTab('review')">审核看板</button>
+      <button class="tab" :class="{ active: activeTab === 'config' }" @click="switchTab('config')">项目配置</button>
+    </nav>
+
     <main class="layout">
+      <template v-if="activeTab === 'review'">
       <section class="card console-overview">
         <div class="section-title">
           <span>Dashboard</span>
@@ -325,6 +331,177 @@
           <div v-if="findingError" class="err">{{ findingError }}</div>
         </article>
       </section>
+      </template>
+
+      <template v-else>
+      <section class="card">
+        <div class="section-title">
+          <span>推送配置</span>
+          <div class="section-actions">
+            <button v-if="!channelForm.open" @click="startChannelCreate">新增推送配置</button>
+            <button v-else class="ghost" @click="cancelChannelForm">取消</button>
+          </div>
+        </div>
+        <p class="muted config-hint">
+          维护可复用的群机器人 webhook(飞书 / 企业微信 / 钉钉),然后在下方项目清单里绑定。
+          URL 与加签密钥保存后仅展示尾 4 位;编辑时留空表示保持不变。
+        </p>
+
+        <form v-if="channelForm.open" class="form-grid" @submit.prevent="submitChannel">
+          <div class="field">
+            <label>名称 *</label>
+            <input v-model.trim="channelForm.name" placeholder="如:后端一组飞书群" maxlength="64" />
+          </div>
+          <div class="field">
+            <label>类型 *</label>
+            <select v-model="channelForm.type">
+              <option value="feishu">飞书</option>
+              <option value="wechat">企业微信</option>
+              <option value="dingtalk">钉钉</option>
+            </select>
+          </div>
+          <div class="field field-span-2">
+            <label>Webhook URL {{ channelForm.editingId ? '(留空保持不变)' : '*' }}</label>
+            <input v-model.trim="channelForm.webhook_url" :placeholder="channelForm.editingId ? channelForm.urlMasked : 'https://open.feishu.cn/open-apis/bot/v2/hook/xxx'" />
+          </div>
+          <div class="field field-span-2">
+            <label>加签密钥 {{ channelForm.editingId ? '(留空保持不变)' : '(可选)' }}</label>
+            <input v-model.trim="channelForm.sign_secret" :placeholder="channelForm.editingId ? channelForm.secretMasked : '机器人安全设置里的加签密钥'" />
+          </div>
+          <div class="field field-span-2">
+            <label>Actions</label>
+            <div class="inline-actions">
+              <button type="submit" :disabled="channelSaving">{{ channelForm.editingId ? '保存' : '创建' }}</button>
+            </div>
+          </div>
+          <div v-if="channelError" class="err field-span-2">{{ channelError }}</div>
+        </form>
+
+        <div class="table-wrap">
+          <table class="tasks-table channels-table">
+            <thead>
+              <tr>
+                <th>名称</th>
+                <th>类型</th>
+                <th>Webhook URL</th>
+                <th>加签密钥</th>
+                <th>绑定项目数</th>
+                <th>更新时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="c in channels" :key="c.channel_id">
+                <td>{{ c.name }}</td>
+                <td><span class="type-badge" :class="'t-' + c.type">{{ typeLabel(c.type) }}</span></td>
+                <td><span class="masked">{{ c.webhook_url_masked }}</span></td>
+                <td><span class="masked">{{ c.sign_secret_masked }}</span></td>
+                <td>{{ c.bound_project_count }}</td>
+                <td>{{ compactTime(c.updated_at) }}</td>
+                <td class="config-actions">
+                  <button class="ghost btn-sm" :disabled="channelTesting === c.channel_id" @click="testChannel(c)">{{ channelTesting === c.channel_id ? '发送中...' : '测试' }}</button>
+                  <button class="ghost btn-sm" @click="editChannel(c)">编辑</button>
+                  <button class="ghost btn-sm btn-danger" @click="deleteChannel(c)">删除</button>
+                </td>
+              </tr>
+              <tr v-if="channels.length === 0">
+                <td colspan="7" class="muted">暂无推送配置。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-if="channelTestResult" class="muted copied-tip" :class="channelTestResult.ok ? 'ok' : 'err'">
+          {{ channelTestResult.ok ? '✅ 测试消息已发送' : '❌ ' + channelTestResult.error }}
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-title">
+          <span>项目清单</span>
+          <span class="muted">{{ projectData.total }} total</span>
+        </div>
+        <p class="muted config-hint">
+          审核任务到达时自动登记;也可手动添加。绑定推送配置后该项目审核结果走该通道,
+          未绑定的项目回退全局 NOTIFY_* 环境变量配置。
+        </p>
+
+        <div class="toolbar">
+          <div class="field">
+            <label>搜索</label>
+            <input v-model.trim="projectQuery" @keyup.enter="loadProjects(1)" placeholder="project id / url" />
+          </div>
+          <div class="field">
+            <label>Actions</label>
+            <div class="inline-actions">
+              <button class="ghost" @click="loadProjects(1)">Search</button>
+            </div>
+          </div>
+        </div>
+
+        <form class="form-grid" @submit.prevent="submitProject">
+          <div class="field">
+            <label>手动添加:Project ID *</label>
+            <input v-model.trim="projectForm.project_id" placeholder="GitLab project id(数字)" />
+          </div>
+          <div class="field">
+            <label>项目 URL(可选)</label>
+            <input v-model.trim="projectForm.project_url" placeholder="https://gitlab.example.com/group/repo" />
+          </div>
+          <div class="field">
+            <label>绑定推送配置(可选)</label>
+            <select v-model="projectForm.channel_id">
+              <option value="">暂不绑定</option>
+              <option v-for="c in channels" :key="c.channel_id" :value="c.channel_id">{{ c.name }} ({{ typeLabel(c.type) }})</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Actions</label>
+            <div class="inline-actions">
+              <button type="submit" :disabled="projectSaving">添加</button>
+            </div>
+          </div>
+          <div v-if="projectError" class="err field-span-2">{{ projectError }}</div>
+        </form>
+
+        <div class="table-wrap">
+          <table class="tasks-table projects-table">
+            <thead>
+              <tr>
+                <th>Project ID</th>
+                <th>项目 URL</th>
+                <th>推送配置</th>
+                <th>更新时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="p in projectData.items" :key="p.project_id">
+                <td>{{ p.project_id }}</td>
+                <td><span class="project-url">{{ p.project_url || '-' }}</span></td>
+                <td>
+                  <select class="bind-select" :value="p.channel ? p.channel.channel_id : ''" @change="bindProject(p, $event.target.value)">
+                    <option value="">未绑定(使用全局配置)</option>
+                    <option v-for="c in channels" :key="c.channel_id" :value="c.channel_id">{{ c.name }} ({{ typeLabel(c.type) }})</option>
+                  </select>
+                </td>
+                <td>{{ compactTime(p.updated_at) }}</td>
+              </tr>
+              <tr v-if="projectData.items.length === 0">
+                <td colspan="4" class="muted">暂无项目。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="pager">
+          <div>Page {{ projectPage }} / {{ projectPages }}</div>
+          <div class="pager-actions">
+            <button class="ghost" :disabled="projectPage <= 1" @click="loadProjects(projectPage - 1)">Prev</button>
+            <button class="ghost" :disabled="projectPage >= projectPages" @click="loadProjects(projectPage + 1)">Next</button>
+          </div>
+        </div>
+        <div v-if="projectBindError" class="err">{{ projectBindError }}</div>
+      </section>
+      </template>
     </main>
   </div>
 

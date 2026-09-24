@@ -5,8 +5,10 @@
 新代码可直接用 storage.task_repo / storage.webhook_repo / storage.service。
 """
 from .connection import _db, init_db
-from .models import ReviewTask
+from .models import NotifyChannel, ReviewProject, ReviewTask
+from .repositories.channel_repository import ChannelRepository
 from .repositories.console_repository import ConsoleRepository
+from .repositories.project_repository import ProjectRepository
 from .repositories.task_repository import TaskRepository
 from .repositories.webhook_repository import WebhookEventRepository
 from .service import ReviewService
@@ -15,7 +17,9 @@ from .service import ReviewService
 task_repo = TaskRepository()
 webhook_repo = WebhookEventRepository()
 console_repo = ConsoleRepository()
-service = ReviewService(task_repo, webhook_repo)
+project_repo = ProjectRepository()
+channel_repo = ChannelRepository()
+service = ReviewService(task_repo, webhook_repo, project_repo, channel_repo)
 
 
 # ── 向后兼容的模块级函数(委托到 service)──────────────────
@@ -60,9 +64,9 @@ def record_webhook_event(*args, **kwargs):
 
 
 __all__ = [
-    "ReviewTask", "init_db",
+    "ReviewTask", "NotifyChannel", "ReviewProject", "init_db",
     "task_repo", "webhook_repo", "service",
-    "console_repo",
+    "console_repo", "project_repo", "channel_repo",
     "create_task", "get_task", "claim_task", "update_status",
     "save_review_artifacts",
     "get_queued_tasks", "get_unposted_tasks", "get_queued_count",

@@ -672,3 +672,105 @@ details.raw > summary {
     font-size: 11px;
   }
 }
+
+/* ── 配置页(tab 导航 / 表单 / 表格) ─────────────────── */
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  max-width: 1680px;
+  margin: 12px auto 0;
+  padding: 0 12px;
+  width: 100%;
+}
+
+.tab {
+  background: #eef4ff;
+  color: var(--brand-deep);
+  border: 1px solid #d3e0fb;
+  border-radius: 999px;
+  padding: 8px 18px;
+  font-size: 14px;
+}
+
+.tab.active {
+  background: linear-gradient(180deg, var(--brand), var(--brand-deep));
+  color: #fff;
+  border-color: transparent;
+}
+
+.config-hint {
+  padding: 0 14px;
+  margin: 0 0 10px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background: linear-gradient(180deg, #f9fbff, #f3f7ff);
+  border: 1px solid #d8e3f7;
+  border-radius: 12px;
+}
+
+.form-grid .field-span-2 {
+  grid-column: span 2;
+}
+
+.channels-table td,
+.projects-table td {
+  vertical-align: middle;
+}
+
+.config-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.btn-danger {
+  color: #b82a2a;
+  border-color: #f3caca;
+  background: #fdf1f1;
+}
+
+.masked {
+  font-family: "IBM Plex Mono", Consolas, monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.type-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.t-feishu { background: #e8f0ff; color: #1b56ad; }
+.t-wechat { background: #e8f8f2; color: #0d7a53; }
+.t-dingtalk { background: #e7f0ff; color: #1467c6; }
+
+.bind-select {
+  max-width: 260px;
+}
+
+.project-url {
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.copied-tip.ok {
+  color: var(--ok);
+}
+
+@media (max-width: 900px) {
+  .form-grid { grid-template-columns: 1fr; }
+  .form-grid .field-span-2 { grid-column: span 1; }
+}

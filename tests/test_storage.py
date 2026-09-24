@@ -171,3 +171,118 @@ def test_init_db_backfills_legacy_missing_columns(tmp_path, monkeypatch):
     assert {"status", "approve", "summary_text", "reject_reason", "session_id", "markdown_summary", "warnings_json", "raw_result_json", "created_at"}.issubset(rr_cols)
     assert {"position", "path", "start_line", "end_line", "severity", "category", "content", "existing_code", "suggestion_code", "created_at"}.issubset(rf_cols)
     assert {"request_uuid", "event_type", "project_id", "mr_iid", "commit_sha", "action", "payload_hash", "task_id"}.issubset(we_cols)
+
+
+# ── 推送配置 / 项目清单 ──────────────────────────────────
+
+def _make_channel(name="飞书群", ctype="feishu", url="https://open.feishu.cn/hook/abc123456", secret="SEC123456"):
+    return storage.channel_repo.create(
+        name=name, type=ctype, webhook_url=url, sign_secret=secret,
+    )
+
+
+def test_channel_crud_and_keep_secret(temp_storage):
+    channel = _make_channel()
+    assert channel.type == "feishu"
+    assert storage.channel_repo.get(channel.channel_id).webhook_url.endswith("abc123456")
+
+    # 更新:webhook_url/sign_secret 留空(None)保持原值
+    updated = storage.channel_repo.update(channel.channel_id, name="改名", type="dingtalk")
+    assert updated.name == "改名"
+    assert updated.type == "dingtalk"
+    assert updated.webhook_url == channel.webhook_url
+    assert updated.sign_secret == channel.sign_secret
+
+    # 显式传新值则覆盖
+    updated = storage.channel_repo.update(channel.channel_id, webhook_url="https://new.example.com/hook")
+    assert updated.webhook_url == "https://new.example.com/hook"
+
+    assert storage.channel_repo.delete(channel.channel_id) is True
+    assert storage.channel_repo.get(channel.channel_id) is None
+
+
+def test_channel_delete_unbinds_projects(temp_storage):
+    channel = _make_channel()
+    storage.project_repo.upsert("42", "https://gitlab.example.com/g/p.git")
+    storage.project_repo.bind("42", channel.channel_id)
+    assert storage.project_repo.get("42").channel_id == channel.channel_id
+
+    storage.channel_repo.delete(channel.channel_id)
+    # 外键 ON DELETE SET NULL:项目自动解绑
+    assert storage.project_repo.get("42").channel_id is None
+
+
+def test_project_upsert_preserves_binding(temp_storage):
+    channel = _make_channel()
+    storage.project_repo.upsert("42", "https://gitlab.example.com/g/p.git")
+    storage.project_repo.bind("42", channel.channel_id)
+    # 任务再次到达触发 upsert:URL 刷新但绑定不被冲掉
+    storage.project_repo.upsert("42", "https://gitlab.example.com/g/p2.git")
+    project = storage.project_repo.get("42")
+    assert project.project_url == "https://gitlab.example.com/g/p2.git"
+    assert project.channel_id == channel.channel_id
+
+
+def test_create_task_auto_registers_project(temp_storage):
+    task_id, created = storage.create_task(
+        project_id="42", mr_iid="1", source_branch="f", target_branch="main",
+        commit_sha="sha1", project_url="https://gitlab.example.com/g/p.git", source="webhook",
+    )
+    assert created
+    project = storage.project_repo.get("42")
+    assert project is not None
+    assert project.project_url == "https://gitlab.example.com/g/p.git"
+
+    # 重复提交(去重路径)同样幂等登记
+    storage.create_task(
+        project_id="42", mr_iid="1", source_branch="f", target_branch="main",
+        commit_sha="sha1", project_url="https://gitlab.example.com/g/p.git", source="webhook",
+    )
+    assert storage.project_repo.list(page=1, page_size=50)["total"] == 1
+
+
+def test_resolve_channel(temp_storage):
+    # 未登记 -> None
+    assert storage.project_repo.resolve_channel("999") is None
+    # 登记未绑定 -> None
+    storage.project_repo.upsert("42", "")
+    assert storage.project_repo.resolve_channel("42") is None
+    # 绑定 -> 通道 dict
+    channel = _make_channel(secret="SEC999")
+    storage.project_repo.bind("42", channel.channel_id)
+    resolved = storage.project_repo.resolve_channel("42")
+    assert resolved == {
+        "channel_id": channel.channel_id,
+        "type": "feishu",
+        "webhook_url": "https://open.feishu.cn/hook/abc123456",
+        "sign_secret": "SEC999",
+    }
+
+
+def test_project_list_search_and_channel_join(temp_storage):
+    channel = _make_channel()
+    storage.project_repo.upsert("42", "https://gitlab.example.com/g/p.git")
+    storage.project_repo.upsert("43", "https://gitlab.example.com/g/other.git")
+    storage.project_repo.bind("42", channel.channel_id)
+
+    result = storage.project_repo.list(page=1, page_size=50, q="other")
+    assert result["total"] == 1
+    assert result["items"][0]["project_id"] == "43"
+    assert result["items"][0]["channel"] is None
+
+    result = storage.project_repo.list(page=1, page_size=50, q="42")
+    assert result["total"] == 1
+    item = result["items"][0]
+    assert item["channel"]["channel_id"] == channel.channel_id
+    assert item["channel"]["type"] == "feishu"
+
+
+def test_bind_unknown_channel_raises(temp_storage):
+    storage.project_repo.upsert("42", "")
+    try:
+        storage.project_repo.bind("42", "no-such-channel")
+        raise AssertionError("should raise")
+    except ValueError:
+        pass
+    # 解绑不存在的项目返回 None
+    assert storage.project_repo.bind("999", None) is None

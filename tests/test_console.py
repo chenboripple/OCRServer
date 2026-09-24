@@ -147,3 +147,155 @@ def test_dashboard_days_filters_metrics(tmp_path, monkeypatch):
     assert filtered_tasks["total"] == filtered_dashboard["overview"]["total"]
     assert filtered_tasks["items"][0]["task_id"] == old_task_id
     assert recent_tasks["total"] == seven_days["overview"]["total"]
+
+
+# ── 配置页 API:推送配置 + 项目清单 ──────────────────────
+
+def _config_client(tmp_path, monkeypatch):
+    from app import config, main, storage
+
+    monkeypatch.setattr(config, "STORAGE_PATH", tmp_path / "console-config.db")
+    storage.init_db()
+    return TestClient(main.app)
+
+
+def test_channel_api_masking_and_edit_keeps_secret(tmp_path, monkeypatch):
+    with _config_client(tmp_path, monkeypatch) as client:
+        secret = "SEC-secret-9876"
+        url = "https://open.feishu.cn/open-apis/bot/v2/hook/abcdefgh"
+        resp = client.post("/api/console/channels", json={
+            "name": "飞书一群", "type": "feishu", "webhook_url": url, "sign_secret": secret,
+        })
+        assert resp.status_code == 201
+        body = resp.json()
+        # 出参只给脱敏值,全值绝不返回
+        assert body["webhook_url_masked"].endswith("efgh")
+        assert secret not in resp.text and url not in resp.text
+        assert body["sign_secret_masked"].endswith("9876")
+        channel_id = body["channel_id"]
+
+        # 列表同样脱敏
+        listing = client.get("/api/console/channels").json()
+        assert listing["items"][0]["webhook_url_masked"].endswith("efgh")
+        assert secret not in str(listing)
+
+        # 编辑:URL/密钥留空(不传)= 保持原值
+        resp = client.put(f"/api/console/channels/{channel_id}", json={
+            "name": "飞书一群改名", "type": "dingtalk",
+        })
+        assert resp.status_code == 200
+        updated = resp.json()
+        assert updated["name"] == "飞书一群改名"
+        assert updated["type"] == "dingtalk"
+        # 库里原值未变
+        from app import storage
+        stored = storage.channel_repo.get(channel_id)
+        assert stored.webhook_url == url
+        assert stored.sign_secret == secret
+
+
+def test_channel_api_validation(tmp_path, monkeypatch):
+    with _config_client(tmp_path, monkeypatch) as client:
+        # 非法类型 -> 422
+        resp = client.post("/api/console/channels", json={
+            "name": "x", "type": "sms", "webhook_url": "https://x.example.com/hook",
+        })
+        assert resp.status_code == 422
+        # 非 http URL -> 422
+        resp = client.post("/api/console/channels", json={
+            "name": "x", "type": "feishu", "webhook_url": "ftp://bad",
+        })
+        assert resp.status_code == 422
+        # 同名 -> 409
+        payload = {"name": "唯一", "type": "feishu", "webhook_url": "https://x.example.com/hook"}
+        assert client.post("/api/console/channels", json=payload).status_code == 201
+        resp = client.post("/api/console/channels", json=payload)
+        assert resp.status_code == 409
+
+
+def test_project_api_bind_unbind_and_channel_delete(tmp_path, monkeypatch):
+    with _config_client(tmp_path, monkeypatch) as client:
+        channel = client.post("/api/console/channels", json={
+            "name": "群A", "type": "wechat", "webhook_url": "https://qyapi.weixin.qq.com/hook/xyz123",
+        }).json()
+        channel_id = channel["channel_id"]
+
+        # 手动添加项目并绑定
+        resp = client.post("/api/console/projects", json={
+            "project_id": "42", "project_url": "https://gitlab.example.com/g/p.git",
+            "channel_id": channel_id,
+        })
+        assert resp.status_code == 201
+        assert resp.json()["channel"]["channel_id"] == channel_id
+
+        # 重复添加幂等,不报错
+        resp = client.post("/api/console/projects", json={"project_id": "42"})
+        assert resp.status_code == 201
+
+        # 解绑
+        resp = client.put("/api/console/projects/42/channel", json={"channel_id": None})
+        assert resp.status_code == 200
+        assert resp.json()["channel"] is None
+
+        # 再绑定后删除通道 -> 项目自动解绑
+        client.put("/api/console/projects/42/channel", json={"channel_id": channel_id})
+        resp = client.delete(f"/api/console/channels/{channel_id}")
+        assert resp.status_code == 204
+        projects = client.get("/api/console/projects").json()
+        assert projects["items"][0]["channel"] is None
+
+        # 绑定不存在的通道 -> 404
+        resp = client.put("/api/console/projects/42/channel", json={"channel_id": "nope"})
+        assert resp.status_code == 404
+
+
+def test_channel_test_endpoint_uses_stored_secret(tmp_path, monkeypatch):
+    with _config_client(tmp_path, monkeypatch) as client:
+        from app import notifier
+
+        channel = client.post("/api/console/channels", json={
+            "name": "测试群", "type": "dingtalk",
+            "webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=tok123",
+            "sign_secret": "SEC321",
+        }).json()
+
+        sent = {}
+
+        class FakeResp:
+            status_code = 200
+
+            def json(self):
+                return {"errcode": 0}
+
+        # monkeypatch 会波及 TestClient 自身的 httpx 调用,只拦截发往钉钉的请求
+        real_post = notifier.httpx.Client.post
+
+        def fake_post(self, url=None, json=None, **kwargs):
+            if url and "dingtalk" in str(url):
+                sent["url"], sent["body"] = url, json
+                return FakeResp()
+            return real_post(self, url, json=json, **kwargs)
+
+        monkeypatch.setattr(notifier.httpx.Client, "post", fake_post)
+        resp = client.post(f"/api/console/channels/{channel['channel_id']}/test")
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+        # 发往存储的 URL,带加签 query(凭据不经页面)
+        assert sent["url"].startswith("https://oapi.dingtalk.com/robot/send")
+        assert "sign=" in sent["url"]
+        assert sent["body"]["msgtype"] == "markdown"
+
+
+def test_create_task_auto_registers_project_via_webhook_fixture(tmp_path, monkeypatch):
+    """走 storage.create_task 的入口(模拟 webhook)会自动登记项目清单。"""
+    from app import storage
+
+    with _config_client(tmp_path, monkeypatch) as client:
+        storage.create_task(
+            project_id="77", mr_iid="3", source_branch="f", target_branch="main",
+            commit_sha="sha77", project_url="https://gitlab.example.com/g/q.git", source="webhook",
+        )
+        projects = client.get("/api/console/projects").json()
+        assert projects["total"] == 1
+        assert projects["items"][0]["project_id"] == "77"
+        assert projects["items"][0]["project_url"] == "https://gitlab.example.com/g/q.git"

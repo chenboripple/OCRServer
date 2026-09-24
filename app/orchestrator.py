@@ -20,9 +20,12 @@ def submit_to_executor(task_id: str):
     executor.submit(do_review_async, task_id)
 
 
-def _mr_author(gl, project_id: str, mr_iid: str) -> str:
-    """查询 MR 作者的 GitLab 用户名(用于飞书卡片艾特)。失败返回空串,不影响通知。"""
-    if not notifier.needs_mr_author() or not gl:
+def _mr_author(gl, project_id: str, mr_iid: str, channel: dict | None = None) -> str:
+    """查询 MR 作者的 GitLab 用户名(用于飞书卡片艾特)。失败返回空串,不影响通知。
+
+    channel: 项目绑定的推送配置(决定通知类型);为 None 时按全局 NOTIFY_* 配置判断。
+    """
+    if not notifier.needs_mr_author(channel) or not gl:
         return ""
     try:
         mr = gl.get_merge_request(project_id, mr_iid)
@@ -32,10 +35,25 @@ def _mr_author(gl, project_id: str, mr_iid: str) -> str:
         return ""
 
 
+def _resolve_channel(project_id: str) -> dict | None:
+    """查项目绑定的推送配置;未绑定/查询失败返回 None(回退全局 NOTIFY_* 配置)。"""
+    if not project_id:
+        return None
+    try:
+        return storage.project_repo.resolve_channel(project_id)
+    except Exception as e:
+        log.warning(f"查询项目推送配置失败(project_id={project_id},回退全局配置): {e}")
+        return None
+
+
 def _submit_notify(*, project_url, source_branch, target_branch,
                    approve, summary="", error=None,
                    gl=None, project_id="", mr_iid=""):
-    """后台投递审核结果通知(失败不影响主流程)。"""
+    """后台投递审核结果通知(失败不影响主流程)。
+
+    推送路由:项目绑定的推送配置优先,未绑定回退全局 NOTIFY_* 环境变量配置。
+    """
+    channel = _resolve_channel(project_id)
     try:
         executor.submit(
             notifier.dispatch,
@@ -45,8 +63,9 @@ def _submit_notify(*, project_url, source_branch, target_branch,
             approve=approve,
             summary=summary,
             error=error,
-            mr_author=_mr_author(gl, project_id, mr_iid),
+            mr_author=_mr_author(gl, project_id, mr_iid, channel),
             mr_iid=mr_iid,
+            channel=channel,
         )
     except Exception as e:
         log.warning(f"提交通知任务失败: {e}")

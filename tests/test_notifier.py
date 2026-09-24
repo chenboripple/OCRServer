@@ -116,19 +116,140 @@ def test_needs_mr_author(feishu_notify, monkeypatch):
 
 
 def test_feishu_request_is_interactive(feishu_notify):
-    url, body = notifier._build_request("text-fallback", card=_card(True, open_id="ou_lisi"))
-    assert url == config.NOTIFY_WEBHOOK_URL
+    url, body = notifier._build_request(
+        "text-fallback", card=_card(True, open_id="ou_lisi"),
+        ntype="feishu", url="https://example.com/hook", secret="",
+    )
+    assert url == "https://example.com/hook"
     assert body["msg_type"] == "interactive"
     assert body["card"]["header"]["template"] == "green"
 
 
 def test_wechat_request_stays_text(monkeypatch):
-    monkeypatch.setattr(config, "NOTIFY_ENABLED", True)
-    monkeypatch.setattr(config, "NOTIFY_TYPE", "wechat")
-    monkeypatch.setattr(config, "NOTIFY_WEBHOOK_URL", "https://example.com/hook")
-    monkeypatch.setattr(config, "NOTIFY_SIGN_SECRET", "")
-    url, body = notifier._build_request("hello", card=None)
+    url, body = notifier._build_request(
+        "hello", ntype="wechat", url="https://example.com/hook", secret="",
+    )
+    assert url == "https://example.com/hook"
     assert body == {"msgtype": "text", "text": {"content": "hello"}}
+
+
+def test_dingtalk_request_is_markdown_with_query_sign():
+    md = notifier._build_dingtalk_markdown(
+        project_name="group/repo", source_branch="feature-x", target_branch="main",
+        approve=False, summary="存在问题", error=None,
+        mr_url="https://gitlab.example.com/group/repo/-/merge_requests/7",
+    )
+    assert md["msgtype"] == "markdown"
+    assert "代码审核" in md["markdown"]["title"]  # 钉钉关键词过滤兜底
+
+    url, body = notifier._build_request(
+        "fallback", markdown=md,
+        ntype="dingtalk", url="https://oapi.dingtalk.com/robot/send?access_token=abc",
+        secret="SEC123",
+    )
+    assert body == md
+    assert "timestamp=" in url and "sign=" in url
+    assert url.startswith("https://oapi.dingtalk.com/robot/send?access_token=abc&")
+
+
+def test_feishu_channel_sign_in_body():
+    url, body = notifier._build_request(
+        "hello", ntype="feishu", url="https://example.com/hook", secret="SEC456",
+    )
+    assert url == "https://example.com/hook"
+    assert "timestamp" in body and "sign" in body
+
+
+def test_needs_mr_author_with_channel(feishu_notify, monkeypatch):
+    """channel 传入时按 channel 类型判断,不看全局配置。"""
+    monkeypatch.setattr(config, "NOTIFY_ENABLED", False)
+    feishu_channel = {"type": "feishu", "webhook_url": "https://x", "sign_secret": ""}
+    wechat_channel = {"type": "wechat", "webhook_url": "https://x", "sign_secret": ""}
+    assert notifier.needs_mr_author(feishu_channel) is True
+    assert notifier.needs_mr_author(wechat_channel) is False
+    assert notifier.needs_mr_author(None) is False  # 全局关了
+
+
+def test_dispatch_uses_channel_over_env(monkeypatch):
+    """项目绑定通道优先于全局 env:NOTIFY_ENABLED=False 也要发。"""
+    monkeypatch.setattr(config, "NOTIFY_ENABLED", False)
+    monkeypatch.setattr(config, "NOTIFY_TYPE", "wechat")
+    monkeypatch.setattr(config, "NOTIFY_WEBHOOK_URL", "https://global.example.com/hook")
+    monkeypatch.setattr(config, "NOTIFY_SIGN_SECRET", "")
+
+    sent = {}
+
+    class FakeResp:
+        status_code = 200
+
+        def json(self):
+            return {"errcode": 0}
+
+    monkeypatch.setattr(
+        notifier.httpx.Client, "post",
+        lambda self, url, json=None: (sent.update(url=url, body=json), FakeResp())[1],
+    )
+    notifier.dispatch(
+        project_url="https://gitlab.example.com/group/repo.git",
+        source_branch="feature-x", target_branch="main",
+        approve=False, summary="存在问题",
+        channel={"type": "dingtalk", "webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=abc", "sign_secret": ""},
+    )
+    assert sent["url"].startswith("https://oapi.dingtalk.com/robot/send")
+    assert sent["body"]["msgtype"] == "markdown"
+
+
+def test_dispatch_invalid_channel_skipped(monkeypatch):
+    called = {"n": 0}
+
+    def fake_post(self, url, json=None):
+        called["n"] += 1
+        raise AssertionError("should not send")
+
+    monkeypatch.setattr(notifier.httpx.Client, "post", fake_post)
+    notifier.dispatch(
+        project_url="https://gitlab.example.com/g/r.git",
+        source_branch="a", target_branch="main", approve=True,
+        channel={"type": "sms", "webhook_url": "https://x", "sign_secret": ""},
+    )
+    assert called["n"] == 0
+
+
+def test_send_test_message_ok(monkeypatch):
+    sent = {}
+
+    class FakeResp:
+        status_code = 200
+
+        def json(self):
+            return {"errcode": 0}
+
+    monkeypatch.setattr(
+        notifier.httpx.Client, "post",
+        lambda self, url, json=None: (sent.update(url=url, body=json), FakeResp())[1],
+    )
+    err = notifier.send_test_message({
+        "type": "wechat", "webhook_url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=x", "sign_secret": "",
+    })
+    assert err is None
+    assert sent["body"]["msgtype"] == "text"
+    assert "测试" in sent["body"]["text"]["content"]
+
+
+def test_send_test_message_business_error(monkeypatch):
+    class FakeResp:
+        status_code = 200
+
+        def json(self):
+            return {"errcode": 310000, "errmsg": "sign not match"}
+
+    monkeypatch.setattr(
+        notifier.httpx.Client, "post", lambda self, url, json=None: FakeResp()
+    )
+    err = notifier.send_test_message({
+        "type": "dingtalk", "webhook_url": "https://x", "sign_secret": "bad",
+    })
+    assert err is not None and "钉钉" in err
 
 
 def test_dispatch_sends_card(feishu_notify, monkeypatch):

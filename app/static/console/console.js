@@ -3,6 +3,8 @@ const { createApp } = Vue;
 createApp({
   data() {
     return {
+      activeTab: "review",
+      configLoaded: false,
       lastRefreshAt: null,
       dashboardDays: 14,
       dashboard: {
@@ -37,7 +39,23 @@ createApp({
       findingError: "",
       copiedTip: "",
       hoverTooltip: null,
-      timer: null
+      timer: null,
+      // ── 配置页:推送配置 ──
+      channels: [],
+      channelForm: { open: false, editingId: "", name: "", type: "feishu", webhook_url: "", sign_secret: "", urlMasked: "", secretMasked: "" },
+      channelError: "",
+      channelSaving: false,
+      channelTesting: "",
+      channelTestResult: null,
+      // ── 配置页:项目清单 ──
+      projectData: { items: [], total: 0, page: 1, page_size: 50 },
+      projectPage: 1,
+      projectPageSize: 50,
+      projectQuery: "",
+      projectForm: { project_id: "", project_url: "", channel_id: "" },
+      projectError: "",
+      projectSaving: false,
+      projectBindError: ""
     };
   },
   computed: {
@@ -46,11 +64,18 @@ createApp({
     },
     findingPages() {
       return Math.max(1, Math.ceil((this.findingData.total || 0) / this.findingPageSize));
+    },
+    projectPages() {
+      return Math.max(1, Math.ceil((this.projectData.total || 0) / this.projectPageSize));
     }
   },
   mounted() {
     this.applyStateFromUrl();
-    this.reloadAll();
+    if (this.activeTab === "config") {
+      this.loadConfig();
+    } else {
+      this.reloadAll();
+    }
     this.timer = window.setInterval(this.autoRefresh, 8000);
   },
   beforeUnmount() {
@@ -59,6 +84,203 @@ createApp({
     }
   },
   methods: {
+    switchTab(tab) {
+      this.activeTab = tab;
+      this.syncStateToUrl();
+      if (tab === "config" && !this.configLoaded) {
+        this.loadConfig();
+      }
+      if (tab === "review" && !this.taskData.items.length) {
+        this.reloadAll();
+      }
+    },
+    async loadConfig() {
+      await Promise.all([this.loadChannels(), this.loadProjects(1)]);
+      this.configLoaded = true;
+    },
+    async loadChannels() {
+      try {
+        const resp = await fetch(this.apiUrl("/api/console/channels"));
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+        this.channels = data.items || [];
+      } catch (e) {
+        this.channelError = `加载推送配置失败: ${String(e)}`;
+      }
+    },
+    async loadProjects(page = 1) {
+      this.projectBindError = "";
+      this.projectPage = page;
+      try {
+        const params = new URLSearchParams();
+        params.set("page", String(page));
+        params.set("page_size", String(this.projectPageSize));
+        if (this.projectQuery) {
+          params.set("q", this.projectQuery);
+        }
+        const resp = await fetch(this.apiUrl(`/api/console/projects?${params.toString()}`));
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        this.projectData = await resp.json();
+      } catch (e) {
+        this.projectBindError = `加载项目清单失败: ${String(e)}`;
+      }
+    },
+    startChannelCreate() {
+      this.channelForm = { open: true, editingId: "", name: "", type: "feishu", webhook_url: "", sign_secret: "", urlMasked: "", secretMasked: "" };
+      this.channelError = "";
+    },
+    editChannel(c) {
+      this.channelForm = {
+        open: true,
+        editingId: c.channel_id,
+        name: c.name,
+        type: c.type,
+        webhook_url: "",
+        sign_secret: "",
+        urlMasked: c.webhook_url_masked,
+        secretMasked: c.sign_secret_masked
+      };
+      this.channelError = "";
+    },
+    cancelChannelForm() {
+      this.channelForm = { open: false, editingId: "", name: "", type: "feishu", webhook_url: "", sign_secret: "", urlMasked: "", secretMasked: "" };
+      this.channelError = "";
+    },
+    async submitChannel() {
+      this.channelError = "";
+      const form = this.channelForm;
+      if (!form.name || !form.type) {
+        this.channelError = "名称与类型必填";
+        return;
+      }
+      if (!form.editingId && !form.webhook_url) {
+        this.channelError = "Webhook URL 必填";
+        return;
+      }
+      const payload = { name: form.name, type: form.type };
+      // 编辑时留空 = 保持原值,不传该字段
+      if (form.webhook_url) {
+        payload.webhook_url = form.webhook_url;
+      }
+      if (form.sign_secret) {
+        payload.sign_secret = form.sign_secret;
+      }
+      this.channelSaving = true;
+      try {
+        const resp = form.editingId
+          ? await fetch(this.apiUrl(`/api/console/channels/${encodeURIComponent(form.editingId)}`), {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            })
+          : await fetch(this.apiUrl("/api/console/channels"), {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            });
+        if (!resp.ok) {
+          const detail = await resp.json().catch(() => ({}));
+          throw new Error(detail.detail || `HTTP ${resp.status}`);
+        }
+        this.cancelChannelForm();
+        await this.loadChannels();
+      } catch (e) {
+        this.channelError = `保存失败: ${String(e)}`;
+      } finally {
+        this.channelSaving = false;
+      }
+    },
+    async deleteChannel(c) {
+      const bound = c.bound_project_count > 0 ? `删除后 ${c.bound_project_count} 个绑定项目将回退全局配置。` : "";
+      if (!window.confirm(`确定删除推送配置「${c.name}」?${bound}`)) {
+        return;
+      }
+      try {
+        const resp = await fetch(this.apiUrl(`/api/console/channels/${encodeURIComponent(c.channel_id)}`), { method: "DELETE" });
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        await this.loadChannels();
+        await this.loadProjects(this.projectPage);
+      } catch (e) {
+        this.channelError = `删除失败: ${String(e)}`;
+      }
+    },
+    async testChannel(c) {
+      this.channelTesting = c.channel_id;
+      this.channelTestResult = null;
+      try {
+        const resp = await fetch(this.apiUrl(`/api/console/channels/${encodeURIComponent(c.channel_id)}/test`), { method: "POST" });
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        this.channelTestResult = await resp.json();
+      } catch (e) {
+        this.channelTestResult = { ok: false, error: String(e) };
+      } finally {
+        this.channelTesting = "";
+      }
+      window.setTimeout(() => {
+        this.channelTestResult = null;
+      }, 5000);
+    },
+    async submitProject() {
+      this.projectError = "";
+      if (!this.projectForm.project_id) {
+        this.projectError = "Project ID 必填";
+        return;
+      }
+      this.projectSaving = true;
+      try {
+        const payload = {
+          project_id: this.projectForm.project_id,
+          project_url: this.projectForm.project_url
+        };
+        if (this.projectForm.channel_id) {
+          payload.channel_id = this.projectForm.channel_id;
+        }
+        const resp = await fetch(this.apiUrl("/api/console/projects"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (!resp.ok) {
+          const detail = await resp.json().catch(() => ({}));
+          throw new Error(detail.detail || `HTTP ${resp.status}`);
+        }
+        this.projectForm = { project_id: "", project_url: "", channel_id: "" };
+        await this.loadProjects(1);
+      } catch (e) {
+        this.projectError = `添加失败: ${String(e)}`;
+      } finally {
+        this.projectSaving = false;
+      }
+    },
+    async bindProject(p, channelId) {
+      this.projectBindError = "";
+      try {
+        const resp = await fetch(this.apiUrl(`/api/console/projects/${encodeURIComponent(p.project_id)}/channel`), {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ channel_id: channelId || null })
+        });
+        if (!resp.ok) {
+          const detail = await resp.json().catch(() => ({}));
+          throw new Error(detail.detail || `HTTP ${resp.status}`);
+        }
+        await this.loadProjects(this.projectPage);
+      } catch (e) {
+        this.projectBindError = `绑定失败: ${String(e)}`;
+        await this.loadProjects(this.projectPage);
+      }
+    },
+    typeLabel(type) {
+      return { feishu: "飞书", wechat: "企业微信", dingtalk: "钉钉" }[type] || type;
+    },
     apiBase() {
       const path = window.location.pathname || "";
       const marker = "/console";
@@ -73,6 +295,9 @@ createApp({
       return `${base}${path}`;
     },
     async autoRefresh() {
+      if (this.activeTab !== "review") {
+        return;
+      }
       const hasActive = this.taskData.items.some((t) => t.status === "queued" || t.status === "running");
       if (!hasActive) {
         return;
@@ -229,6 +454,9 @@ createApp({
     },
     syncStateToUrl() {
       const params = new URLSearchParams();
+      if (this.activeTab === "config") {
+        params.set("tab", "config");
+      }
       for (const [k, v] of Object.entries(this.filters)) {
         if (v !== "") {
           params.set(k, String(v));
@@ -259,6 +487,8 @@ createApp({
     applyStateFromUrl() {
       const params = new URLSearchParams(window.location.search);
       const read = (k, fallback = "") => params.get(k) ?? fallback;
+
+      this.activeTab = read("tab") === "config" ? "config" : "review";
 
       this.filters.status = read("status");
       this.filters.source = read("source");

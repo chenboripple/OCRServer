@@ -182,3 +182,31 @@ def init_db():
             "payload_hash": "payload_hash TEXT",
             "task_id": "task_id TEXT",
         })
+
+        # 推送配置:可复用的机器人 webhook(飞书/企微/钉钉),项目绑定后优先生效。
+        # webhook_url / sign_secret 是敏感值:仓储可读全值,路由层返回给页面时必须脱敏。
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS notify_channel (
+                channel_id   TEXT PRIMARY KEY,
+                name         TEXT NOT NULL,
+                type         TEXT NOT NULL,
+                webhook_url  TEXT NOT NULL,
+                sign_secret  TEXT NOT NULL DEFAULT '',
+                created_at   TEXT NOT NULL,
+                updated_at   TEXT NOT NULL
+            )
+        """)
+        # 项目清单:任务创建时自动登记(upsert,不动 channel_id),也可在配置页手动添加。
+        # channel_id 为空 = 未绑定,通知回退到全局 NOTIFY_* 环境变量配置。
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS review_project (
+                project_id   TEXT PRIMARY KEY,
+                project_url  TEXT NOT NULL DEFAULT '',
+                channel_id   TEXT,
+                created_at   TEXT NOT NULL,
+                updated_at   TEXT NOT NULL,
+                FOREIGN KEY(channel_id) REFERENCES notify_channel(channel_id) ON DELETE SET NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_notify_channel_name ON notify_channel(name)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_review_project_channel ON review_project(channel_id)")
