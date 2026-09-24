@@ -387,6 +387,27 @@ def test_project_tags_set_filter_and_cascade(tmp_path, monkeypatch):
         assert resp.json()["tags"] == []
 
 
+def test_projects_filter_by_channel(tmp_path, monkeypatch):
+    with _config_client(tmp_path, monkeypatch) as client:
+        channel = client.post("/api/console/channels", json={
+            "name": "群A", "type": "feishu", "webhook_url": "https://open.feishu.cn/hook/abc",
+        }).json()
+        client.post("/api/console/projects", json={"project_id": "42", "channel_id": channel["channel_id"]})
+        client.post("/api/console/projects", json={"project_id": "43"})
+
+        # 按具体通道筛选
+        bound = client.get(f"/api/console/projects?channel={channel['channel_id']}").json()
+        assert bound["total"] == 1 and bound["items"][0]["project_id"] == "42"
+        # 未绑定
+        unbound = client.get("/api/console/projects?channel=none").json()
+        assert unbound["total"] == 1 and unbound["items"][0]["project_id"] == "43"
+        # 不传 = 全部
+        assert client.get("/api/console/projects").json()["total"] == 2
+        # 与关键词组合
+        both = client.get(f"/api/console/projects?channel=none&q=43").json()
+        assert both["total"] == 1 and both["items"][0]["project_id"] == "43"
+
+
 def test_tasks_and_dashboard_filter_by_project_tag(tmp_path, monkeypatch):
     with _config_client(tmp_path, monkeypatch) as client:
         core_tag = _mk_tag(client, "核心")

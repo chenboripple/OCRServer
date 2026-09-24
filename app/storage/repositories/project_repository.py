@@ -53,9 +53,11 @@ class ProjectRepository:
         page_size: int = 50,
         q: str | None = None,
         tag_ids: Optional[list[str]] = None,
+        channel: str | None = None,
     ) -> dict:
         """分页列出项目。q 模糊匹配 project_id / project_url;
-        tag_ids 任一命中即返回(OR 语义)。出参带项目标签列表。"""
+        tag_ids 任一命中即返回(OR 语义);channel 为 "none" 查未绑定,否则按 channel_id 精确匹配。
+        出参带项目标签列表。"""
         where = ""
         params: list = []
         conditions = []
@@ -63,6 +65,12 @@ class ProjectRepository:
             like = f"%{q}%"
             conditions.append("(p.project_id LIKE ? OR p.project_url LIKE ?)")
             params += [like, like]
+        if channel:
+            if channel == "none":
+                conditions.append("p.channel_id IS NULL")
+            else:
+                conditions.append("p.channel_id = ?")
+                params.append(channel)
         if tag_ids:
             placeholders = ",".join("?" for _ in tag_ids)
             conditions.append(

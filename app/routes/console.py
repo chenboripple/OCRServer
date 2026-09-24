@@ -265,8 +265,9 @@ def list_projects(
     page_size: int = Query(50, ge=1, le=200),
     q: str | None = None,
     tag_id: list[str] | None = Query(None, description="标签过滤,可重复传(任一命中)"),
+    channel: str | None = Query(None, description="推送配置过滤: none=未绑定, 其他=channel_id"),
 ):
-    return storage.project_repo.list(page=page, page_size=page_size, q=q, tag_ids=tag_id)
+    return storage.project_repo.list(page=page, page_size=page_size, q=q, tag_ids=tag_id, channel=channel)
 
 
 @router.post("/api/console/projects", status_code=201)

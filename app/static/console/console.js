@@ -4,7 +4,6 @@ createApp({
   data() {
     return {
       activeTab: "review",
-      configLoaded: false,
       lastRefreshAt: null,
       dashboardDays: 14,
       dashboard: {
@@ -50,24 +49,25 @@ createApp({
       channelTestResult: null,
       // ── 配置页:项目标签 ──
       tags: [],
-      tagForm: { name: "" },
       tagSaving: false,
       tagError: "",
-      tagEditId: "",
-      tagEditName: "",
-      projectTagFilter: [],      // 项目清单标签筛选(可多选,任一命中)
-      editingTagsFor: "",        // 正在编辑标签的 project_id
-      tagEditSelection: [],      // 编辑中的已选 tag_id
-      projectTagsSaving: false,
+      tagModal: { open: false, editingId: "", name: "" },
       // ── 配置页:项目清单 ──
       projectData: { items: [], total: 0, page: 1, page_size: 50 },
       projectPage: 1,
       projectPageSize: 50,
       projectQuery: "",
+      projectChannelFilter: "",  // ""=全部 / "none"=未绑定 / channel_id
+      projectTagFilter: [],      // 标签筛选(可多选,任一命中)
+      projectCreateModal: { open: false },
+      projectConfigModal: { open: false, projectId: "", channelId: "", tagSelection: [] },
+      projectConfigSaving: false,
       projectForm: { project_id: "", project_url: "", channel_id: "" },
       projectError: "",
       projectSaving: false,
-      projectBindError: ""
+      projectBindError: "",
+      // ── 通用确认模态框 ──
+      confirmModal: { open: false, title: "", message: "", confirmText: "", loading: false, action: null }
     };
   },
   computed: {
@@ -83,12 +83,12 @@ createApp({
   },
   mounted() {
     this.applyStateFromUrl();
-    // 标签两个 tab 都要用(看板筛选下拉 + 配置页管理/打标),无条件加载
+    // 标签所有 tab 都要用(看板筛选下拉 + 配置页签),无条件加载
     this.loadTags();
-    if (this.activeTab === "config") {
-      this.loadConfig();
-    } else {
+    if (this.activeTab === "review") {
       this.reloadAll();
+    } else {
+      this.loadConfigData();
     }
     this.timer = window.setInterval(this.autoRefresh, 8000);
   },
@@ -101,16 +101,17 @@ createApp({
     switchTab(tab) {
       this.activeTab = tab;
       this.syncStateToUrl();
-      if (tab === "config" && !this.configLoaded) {
-        this.loadConfig();
+      if (tab === "review") {
+        if (!this.taskData.items.length) {
+          this.reloadAll();
+        }
+        return;
       }
-      if (tab === "review" && !this.taskData.items.length) {
-        this.reloadAll();
-      }
+      // 任一配置页签都整组刷新:项目清单要显示通道与标签,数据量小,直接全量拉取
+      this.loadConfigData();
     },
-    async loadConfig() {
+    async loadConfigData() {
       await Promise.all([this.loadChannels(), this.loadProjects(1), this.loadTags()]);
-      this.configLoaded = true;
     },
     async loadChannels() {
       try {
@@ -133,6 +134,9 @@ createApp({
         params.set("page_size", String(this.projectPageSize));
         if (this.projectQuery) {
           params.set("q", this.projectQuery);
+        }
+        if (this.projectChannelFilter) {
+          params.set("channel", this.projectChannelFilter);
         }
         for (const tagId of this.projectTagFilter) {
           params.append("tag_id", tagId);
@@ -211,21 +215,20 @@ createApp({
         this.channelSaving = false;
       }
     },
-    async deleteChannel(c) {
+    askDeleteChannel(c) {
       const bound = c.bound_project_count > 0 ? `删除后 ${c.bound_project_count} 个绑定项目将回退全局配置。` : "";
-      if (!window.confirm(`确定删除推送配置「${c.name}」?${bound}`)) {
-        return;
-      }
-      try {
-        const resp = await fetch(this.apiUrl(`/api/console/channels/${encodeURIComponent(c.channel_id)}`), { method: "DELETE" });
-        if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}`);
+      this.askConfirm("删除推送配置", `确定删除「${c.name}」?${bound}`, "删除", async () => {
+        try {
+          const resp = await fetch(this.apiUrl(`/api/console/channels/${encodeURIComponent(c.channel_id)}`), { method: "DELETE" });
+          if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}`);
+          }
+          await this.loadChannels();
+          await this.loadProjects(this.projectPage);
+        } catch (e) {
+          this.channelError = `删除失败: ${String(e)}`;
         }
-        await this.loadChannels();
-        await this.loadProjects(this.projectPage);
-      } catch (e) {
-        this.channelError = `删除失败: ${String(e)}`;
-      }
+      });
     },
     async testChannel(c) {
       this.channelTesting = c.channel_id;
@@ -258,89 +261,68 @@ createApp({
         this.tagError = `加载标签失败: ${String(e)}`;
       }
     },
-    async submitTag() {
+    openTagCreate() {
+      this.tagModal = { open: true, editingId: "", name: "" };
       this.tagError = "";
-      const name = this.tagForm.name;
-      if (!name) {
+    },
+    openTagRename(t) {
+      this.tagModal = { open: true, editingId: t.tag_id, name: t.name };
+      this.tagError = "";
+    },
+    cancelTagModal() {
+      this.tagModal = { open: false, editingId: "", name: "" };
+      this.tagError = "";
+    },
+    async submitTagModal() {
+      this.tagError = "";
+      if (!this.tagModal.name) {
         this.tagError = "标签名必填";
         return;
       }
       this.tagSaving = true;
       try {
-        const resp = await fetch(this.apiUrl("/api/console/tags"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name })
-        });
+        const editing = this.tagModal.editingId;
+        const resp = editing
+          ? await fetch(this.apiUrl(`/api/console/tags/${encodeURIComponent(editing)}`), {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: this.tagModal.name })
+            })
+          : await fetch(this.apiUrl("/api/console/tags"), {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: this.tagModal.name })
+            });
         if (!resp.ok) {
           const detail = await resp.json().catch(() => ({}));
           throw new Error(detail.detail || `HTTP ${resp.status}`);
         }
-        this.tagForm.name = "";
+        this.cancelTagModal();
         await this.loadTags();
       } catch (e) {
-        this.tagError = `添加标签失败: ${String(e)}`;
+        this.tagError = `保存标签失败: ${String(e)}`;
       } finally {
         this.tagSaving = false;
       }
     },
-    startTagEdit(t) {
-      this.tagEditId = t.tag_id;
-      this.tagEditName = t.name;
-      this.tagError = "";
-    },
-    cancelTagEdit() {
-      this.tagEditId = "";
-      this.tagEditName = "";
-      this.tagError = "";
-    },
-    async saveTagEdit() {
-      this.tagError = "";
-      if (!this.tagEditName) {
-        this.tagError = "标签名必填";
-        return;
-      }
-      this.tagSaving = true;
-      try {
-        const resp = await fetch(this.apiUrl(`/api/console/tags/${encodeURIComponent(this.tagEditId)}`), {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: this.tagEditName })
-        });
-        if (!resp.ok) {
-          const detail = await resp.json().catch(() => ({}));
-          throw new Error(detail.detail || `HTTP ${resp.status}`);
-        }
-        this.cancelTagEdit();
-        await this.loadTags();
-        // 标签名变了,项目清单里的 chip 也要刷新
-        await this.loadProjects(this.projectPage);
-      } catch (e) {
-        this.tagError = `重命名失败: ${String(e)}`;
-      } finally {
-        this.tagSaving = false;
-      }
-    },
-    async deleteTag(t) {
+    askDeleteTag(t) {
       const bound = t.project_count > 0 ? `该标签已用于 ${t.project_count} 个项目,删除后同步解除绑定。` : "";
-      if (!window.confirm(`确定删除标签「${t.name}」?${bound}`)) {
-        return;
-      }
-      this.tagError = "";
-      try {
-        const resp = await fetch(this.apiUrl(`/api/console/tags/${encodeURIComponent(t.tag_id)}`), { method: "DELETE" });
-        if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}`);
+      this.askConfirm("删除标签", `确定删除标签「${t.name}」?${bound}`, "删除", async () => {
+        try {
+          const resp = await fetch(this.apiUrl(`/api/console/tags/${encodeURIComponent(t.tag_id)}`), { method: "DELETE" });
+          if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}`);
+          }
+          this.projectTagFilter = this.projectTagFilter.filter((id) => id !== t.tag_id);
+          if (this.filters.tag_id === t.tag_id) {
+            this.filters.tag_id = "";
+          }
+          await this.loadTags();
+          await this.loadProjects(this.projectPage);
+        } catch (e) {
+          this.tagError = `删除失败: ${String(e)}`;
         }
-        this.projectTagFilter = this.projectTagFilter.filter((id) => id !== t.tag_id);
-        if (this.filters.tag_id === t.tag_id) {
-          this.filters.tag_id = "";
-        }
-        await this.loadTags();
-        await this.loadProjects(this.projectPage);
-      } catch (e) {
-        this.tagError = `删除失败: ${String(e)}`;
-      }
+      });
     },
     toggleProjectTagFilter(tagId) {
       if (this.projectTagFilter.includes(tagId)) {
@@ -354,42 +336,11 @@ createApp({
       this.projectTagFilter = [];
       this.loadProjects(1);
     },
-    startProjectTagsEdit(p) {
-      this.editingTagsFor = p.project_id;
-      this.tagEditSelection = (p.tags || []).map((t) => t.tag_id);
-      this.projectBindError = "";
-    },
-    cancelProjectTagsEdit() {
-      this.editingTagsFor = "";
-      this.tagEditSelection = [];
-    },
-    toggleTagEditSelection(tagId) {
-      if (this.tagEditSelection.includes(tagId)) {
-        this.tagEditSelection = this.tagEditSelection.filter((id) => id !== tagId);
-      } else {
-        this.tagEditSelection = [...this.tagEditSelection, tagId];
-      }
-    },
-    async saveProjectTags(p) {
-      this.projectBindError = "";
-      this.projectTagsSaving = true;
-      try {
-        const resp = await fetch(this.apiUrl(`/api/console/projects/${encodeURIComponent(p.project_id)}/tags`), {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tag_ids: this.tagEditSelection })
-        });
-        if (!resp.ok) {
-          const detail = await resp.json().catch(() => ({}));
-          throw new Error(detail.detail || `HTTP ${resp.status}`);
-        }
-        this.cancelProjectTagsEdit();
-        await this.loadProjects(this.projectPage);
-      } catch (e) {
-        this.projectBindError = `保存标签失败: ${String(e)}`;
-      } finally {
-        this.projectTagsSaving = false;
-      }
+    resetProjectFilters() {
+      this.projectQuery = "";
+      this.projectChannelFilter = "";
+      this.projectTagFilter = [];
+      this.loadProjects(1);
     },
     tagColorClass(name) {
       let hash = 0;
@@ -398,6 +349,35 @@ createApp({
         hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
       }
       return `tc-${hash % 5}`;
+    },
+    // ── 通用确认模态框 ─────────────────────────────────
+    askConfirm(title, message, confirmText, action) {
+      this.confirmModal = { open: true, title, message, confirmText: confirmText || "确定", loading: false, action };
+    },
+    closeConfirm() {
+      this.confirmModal = { open: false, title: "", message: "", confirmText: "", loading: false, action: null };
+    },
+    async confirmModalAction() {
+      const action = this.confirmModal.action;
+      if (!action) {
+        this.closeConfirm();
+        return;
+      }
+      this.confirmModal.loading = true;
+      try {
+        await action();
+      } finally {
+        this.closeConfirm();
+      }
+    },
+    openProjectCreate() {
+      this.projectForm = { project_id: "", project_url: "", channel_id: "" };
+      this.projectError = "";
+      this.projectCreateModal = { open: true };
+    },
+    cancelProjectCreate() {
+      this.projectCreateModal = { open: false };
+      this.projectError = "";
     },
     async submitProject() {
       this.projectError = "";
@@ -423,7 +403,7 @@ createApp({
           const detail = await resp.json().catch(() => ({}));
           throw new Error(detail.detail || `HTTP ${resp.status}`);
         }
-        this.projectForm = { project_id: "", project_url: "", channel_id: "" };
+        this.cancelProjectCreate();
         await this.loadProjects(1);
       } catch (e) {
         this.projectError = `添加失败: ${String(e)}`;
@@ -431,22 +411,54 @@ createApp({
         this.projectSaving = false;
       }
     },
-    async bindProject(p, channelId) {
+    openProjectConfig(p) {
+      this.projectConfigModal = {
+        open: true,
+        projectId: p.project_id,
+        channelId: p.channel ? p.channel.channel_id : "",
+        tagSelection: (p.tags || []).map((t) => t.tag_id)
+      };
       this.projectBindError = "";
+    },
+    cancelProjectConfig() {
+      this.projectConfigModal = { open: false, projectId: "", channelId: "", tagSelection: [] };
+      this.projectBindError = "";
+    },
+    toggleConfigTagSelection(tagId) {
+      const sel = this.projectConfigModal.tagSelection;
+      this.projectConfigModal.tagSelection = sel.includes(tagId)
+        ? sel.filter((id) => id !== tagId)
+        : [...sel, tagId];
+    },
+    async saveProjectConfig() {
+      const m = this.projectConfigModal;
+      this.projectBindError = "";
+      this.projectConfigSaving = true;
       try {
-        const resp = await fetch(this.apiUrl(`/api/console/projects/${encodeURIComponent(p.project_id)}/channel`), {
+        const resp = await fetch(this.apiUrl(`/api/console/projects/${encodeURIComponent(m.projectId)}/channel`), {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ channel_id: channelId || null })
+          body: JSON.stringify({ channel_id: m.channelId || null })
         });
         if (!resp.ok) {
           const detail = await resp.json().catch(() => ({}));
           throw new Error(detail.detail || `HTTP ${resp.status}`);
         }
+        const resp2 = await fetch(this.apiUrl(`/api/console/projects/${encodeURIComponent(m.projectId)}/tags`), {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tag_ids: m.tagSelection })
+        });
+        if (!resp2.ok) {
+          const detail = await resp2.json().catch(() => ({}));
+          throw new Error(detail.detail || `HTTP ${resp2.status}`);
+        }
+        this.cancelProjectConfig();
         await this.loadProjects(this.projectPage);
       } catch (e) {
-        this.projectBindError = `绑定失败: ${String(e)}`;
-        await this.loadProjects(this.projectPage);
+        this.projectBindError = `保存失败: ${String(e)}`;
+      } finally {
+        this.projectConfigSaving = false;
       }
     },
     typeLabel(type) {
@@ -626,8 +638,8 @@ createApp({
     },
     syncStateToUrl() {
       const params = new URLSearchParams();
-      if (this.activeTab === "config") {
-        params.set("tab", "config");
+      if (this.activeTab !== "review") {
+        params.set("tab", this.activeTab);
       }
       for (const [k, v] of Object.entries(this.filters)) {
         if (v !== "") {
@@ -660,7 +672,9 @@ createApp({
       const params = new URLSearchParams(window.location.search);
       const read = (k, fallback = "") => params.get(k) ?? fallback;
 
-      this.activeTab = read("tab") === "config" ? "config" : "review";
+      // 页签:projects | channels | tags;旧链接 tab=config 归入 projects
+      const tab = read("tab", "review");
+      this.activeTab = ["projects", "channels", "tags"].includes(tab) ? tab : (tab === "config" ? "projects" : "review");
 
       this.filters.status = read("status");
       this.filters.source = read("source");

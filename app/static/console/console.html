@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OCR Server Console</title>
-  <link rel="stylesheet" href="console/assets/console.css?v=20260924-1" />
+  <link rel="stylesheet" href="console/assets/console.css?v=20260924-2" />
   <script defer src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-  <script defer src="console/assets/console.js?v=20260924-1"></script>
+  <script defer src="console/assets/console.js?v=20260924-2"></script>
 </head>
 <body>
   <div id="app">
@@ -28,7 +28,9 @@
 
     <nav class="tabs">
       <button class="tab" :class="{ active: activeTab === 'review' }" @click="switchTab('review')">审核看板</button>
-      <button class="tab" :class="{ active: activeTab === 'config' }" @click="switchTab('config')">项目配置</button>
+      <button class="tab" :class="{ active: activeTab === 'projects' }" @click="switchTab('projects')">项目清单</button>
+      <button class="tab" :class="{ active: activeTab === 'channels' }" @click="switchTab('channels')">推送配置</button>
+      <button class="tab" :class="{ active: activeTab === 'tags' }" @click="switchTab('tags')">项目标签</button>
     </nav>
 
     <main class="layout">
@@ -341,49 +343,120 @@
       </section>
       </template>
 
-      <template v-else>
+      <template v-else-if="activeTab === 'projects'">
+      <section class="card">
+        <div class="section-title">
+          <span>项目清单</span>
+          <div class="section-actions">
+            <span class="muted">{{ projectData.total }} total</span>
+            <button class="ghost" @click="loadProjects(projectPage)">刷新</button>
+            <button @click="openProjectCreate">手动添加</button>
+          </div>
+        </div>
+        <p class="muted config-hint">
+          审核任务到达时自动登记;也可手动添加。「配置」里可绑定推送通道与打标签;
+          未绑定推送的项目回退全局 NOTIFY_* 环境变量配置。
+        </p>
+
+        <div class="toolbar">
+          <div class="field">
+            <label>关键词</label>
+            <input v-model.trim="projectQuery" @keyup.enter="loadProjects(1)" placeholder="project id / url" />
+          </div>
+          <div class="field">
+            <label>推送配置</label>
+            <select v-model="projectChannelFilter" @change="loadProjects(1)">
+              <option value="">全部</option>
+              <option value="none">未绑定</option>
+              <option v-for="c in channels" :key="c.channel_id" :value="c.channel_id">{{ c.name }} ({{ typeLabel(c.type) }})</option>
+            </select>
+          </div>
+          <div class="field" v-if="tags.length">
+            <label>标签(任一命中)</label>
+            <div class="tag-filter-chips">
+              <button
+                type="button"
+                class="tag-chip tag-toggle"
+                v-for="t in tags"
+                :key="t.tag_id"
+                :class="[tagColorClass(t.name), { selected: projectTagFilter.includes(t.tag_id) }]"
+                @click="toggleProjectTagFilter(t.tag_id)"
+              >{{ t.name }}</button>
+              <button v-if="projectTagFilter.length" type="button" class="ghost btn-sm" @click="clearProjectTagFilter">清除</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>Actions</label>
+            <div class="inline-actions">
+              <button @click="loadProjects(1)">Search</button>
+              <button class="ghost" @click="resetProjectFilters">Reset</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="tasks-table projects-table">
+            <thead>
+              <tr>
+                <th>Project ID</th>
+                <th>项目 URL</th>
+                <th class="col-project-tags">标签</th>
+                <th>推送配置</th>
+                <th>更新时间</th>
+                <th class="col-actions">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="p in projectData.items" :key="p.project_id">
+                <td>{{ p.project_id }}</td>
+                <td><span class="project-url">{{ p.project_url || '-' }}</span></td>
+                <td class="col-project-tags">
+                  <div class="project-tags">
+                    <span v-for="tg in p.tags" :key="tg.tag_id" class="tag-chip" :class="tagColorClass(tg.name)">{{ tg.name }}</span>
+                    <span v-if="!p.tags || !p.tags.length" class="muted">-</span>
+                  </div>
+                </td>
+                <td>
+                  <span v-if="p.channel">{{ p.channel.name }} ({{ typeLabel(p.channel.type) }})</span>
+                  <span v-else class="muted">未绑定(全局配置)</span>
+                </td>
+                <td>{{ compactTime(p.updated_at) }}</td>
+                <td class="config-actions">
+                  <button class="ghost btn-sm" @click="openProjectConfig(p)">配置</button>
+                </td>
+              </tr>
+              <tr v-if="projectData.items.length === 0">
+                <td colspan="6" class="muted">暂无项目。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="pager">
+          <div>Page {{ projectPage }} / {{ projectPages }}</div>
+          <div class="pager-actions">
+            <button class="ghost" :disabled="projectPage <= 1" @click="loadProjects(projectPage - 1)">Prev</button>
+            <button class="ghost" :disabled="projectPage >= projectPages" @click="loadProjects(projectPage + 1)">Next</button>
+          </div>
+        </div>
+        <div v-if="projectBindError" class="err config-hint">{{ projectBindError }}</div>
+      </section>
+      </template>
+
+      <template v-else-if="activeTab === 'channels'">
       <section class="card">
         <div class="section-title">
           <span>推送配置</span>
           <div class="section-actions">
-            <button v-if="!channelForm.open" @click="startChannelCreate">新增推送配置</button>
-            <button v-else class="ghost" @click="cancelChannelForm">取消</button>
+            <span class="muted">{{ channels.length }} 项</span>
+            <button class="ghost" @click="loadChannels">刷新</button>
+            <button @click="startChannelCreate">新增推送配置</button>
           </div>
         </div>
         <p class="muted config-hint">
-          维护可复用的群机器人 webhook(飞书 / 企业微信 / 钉钉),然后在下方项目清单里绑定。
+          维护可复用的群机器人 webhook(飞书 / 企业微信 / 钉钉),在「项目清单」的配置里绑定到项目。
           URL 与加签密钥保存后仅展示尾 4 位;编辑时留空表示保持不变。
         </p>
-
-        <form v-if="channelForm.open" class="form-grid" @submit.prevent="submitChannel">
-          <div class="field">
-            <label>名称 *</label>
-            <input v-model.trim="channelForm.name" placeholder="如:后端一组飞书群" maxlength="64" />
-          </div>
-          <div class="field">
-            <label>类型 *</label>
-            <select v-model="channelForm.type">
-              <option value="feishu">飞书</option>
-              <option value="wechat">企业微信</option>
-              <option value="dingtalk">钉钉</option>
-            </select>
-          </div>
-          <div class="field field-span-2">
-            <label>Webhook URL {{ channelForm.editingId ? '(留空保持不变)' : '*' }}</label>
-            <input v-model.trim="channelForm.webhook_url" :placeholder="channelForm.editingId ? channelForm.urlMasked : 'https://open.feishu.cn/open-apis/bot/v2/hook/xxx'" />
-          </div>
-          <div class="field field-span-2">
-            <label>加签密钥 {{ channelForm.editingId ? '(留空保持不变)' : '(可选)' }}</label>
-            <input v-model.trim="channelForm.sign_secret" :placeholder="channelForm.editingId ? channelForm.secretMasked : '机器人安全设置里的加签密钥'" />
-          </div>
-          <div class="field field-span-2">
-            <label>Actions</label>
-            <div class="inline-actions">
-              <button type="submit" :disabled="channelSaving">{{ channelForm.editingId ? '保存' : '创建' }}</button>
-            </div>
-          </div>
-          <div v-if="channelError" class="err field-span-2">{{ channelError }}</div>
-        </form>
 
         <div class="table-wrap">
           <table class="tasks-table channels-table">
@@ -409,7 +482,7 @@
                 <td class="config-actions">
                   <button class="ghost btn-sm" :disabled="channelTesting === c.channel_id" @click="testChannel(c)">{{ channelTesting === c.channel_id ? '发送中...' : '测试' }}</button>
                   <button class="ghost btn-sm" @click="editChannel(c)">编辑</button>
-                  <button class="ghost btn-sm btn-danger" @click="deleteChannel(c)">删除</button>
+                  <button class="ghost btn-sm btn-danger" @click="askDeleteChannel(c)">删除</button>
                 </td>
               </tr>
               <tr v-if="channels.length === 0">
@@ -421,174 +494,185 @@
         <div v-if="channelTestResult" class="muted copied-tip" :class="channelTestResult.ok ? 'ok' : 'err'">
           {{ channelTestResult.ok ? '✅ 测试消息已发送' : '❌ ' + channelTestResult.error }}
         </div>
+        <div v-if="channelError" class="err config-hint">{{ channelError }}</div>
       </section>
+      </template>
 
+      <template v-else>
       <section class="card">
         <div class="section-title">
           <span>项目标签</span>
-          <span class="muted">{{ tags.length }} 个标签</span>
+          <div class="section-actions">
+            <span class="muted">{{ tags.length }} 个标签</span>
+            <button class="ghost" @click="loadTags">刷新</button>
+            <button @click="openTagCreate">添加标签</button>
+          </div>
         </div>
         <p class="muted config-hint">
-          标签需先在这里维护,再到下方项目清单给项目打标签;审核看板与项目清单均可按标签筛选。
+          标签在这里提前维护;在「项目清单」的配置里给项目打标签,清单与审核看板均可按标签筛选。
         </p>
-
-        <form class="tag-add-form" @submit.prevent="submitTag">
-          <input v-model.trim="tagForm.name" placeholder="新标签名称,如:核心系统 / 支付 / 前端" maxlength="32" />
-          <button type="submit" :disabled="tagSaving">{{ tagSaving ? '添加中...' : '添加标签' }}</button>
-        </form>
-        <div v-if="tagError" class="err tag-error">{{ tagError }}</div>
 
         <div class="tag-manage-list">
           <div class="tag-manage-item" v-for="t in tags" :key="t.tag_id">
-            <template v-if="tagEditId === t.tag_id">
-              <input
-                class="tag-edit-input"
-                v-model.trim="tagEditName"
-                maxlength="32"
-                @keyup.enter="saveTagEdit(t)"
-                @keyup.esc="cancelTagEdit"
-              />
-              <button class="btn-sm" @click="saveTagEdit(t)" :disabled="tagSaving">保存</button>
-              <button class="ghost btn-sm" @click="cancelTagEdit">取消</button>
-            </template>
-            <template v-else>
-              <span class="tag-chip" :class="tagColorClass(t.name)">{{ t.name }}</span>
-              <span class="muted tag-count">{{ t.project_count }} 个项目</span>
-              <button class="ghost btn-sm" @click="startTagEdit(t)">重命名</button>
-              <button class="ghost btn-sm btn-danger" @click="deleteTag(t)">删除</button>
-            </template>
+            <span class="tag-chip" :class="tagColorClass(t.name)">{{ t.name }}</span>
+            <span class="muted tag-count">{{ t.project_count }} 个项目</span>
+            <button class="ghost btn-sm" @click="openTagRename(t)">重命名</button>
+            <button class="ghost btn-sm btn-danger" @click="askDeleteTag(t)">删除</button>
           </div>
-          <div class="muted" v-if="tags.length === 0">暂无标签,先在上方添加。</div>
+          <div class="muted" v-if="tags.length === 0">暂无标签,点右上角「添加标签」创建。</div>
         </div>
+        <div v-if="tagError" class="err config-hint">{{ tagError }}</div>
       </section>
+      </template>
+    </main>
 
-      <section class="card">
-        <div class="section-title">
-          <span>项目清单</span>
-          <span class="muted">{{ projectData.total }} total</span>
+    <!-- ── 模态框:推送配置 新增/编辑 ─────────────────────── -->
+    <div class="modal-mask" v-if="channelForm.open" @click.self="cancelChannelForm">
+      <div class="modal">
+        <div class="modal-head">
+          <span>{{ channelForm.editingId ? '编辑推送配置' : '新增推送配置' }}</span>
+          <button class="ghost btn-sm" type="button" @click="cancelChannelForm">✕</button>
         </div>
-        <p class="muted config-hint">
-          审核任务到达时自动登记;也可手动添加。绑定推送配置后该项目审核结果走该通道,
-          未绑定的项目回退全局 NOTIFY_* 环境变量配置。
-        </p>
-
-        <div class="toolbar">
+        <form class="modal-body form-grid" @submit.prevent="submitChannel">
           <div class="field">
-            <label>搜索</label>
-            <input v-model.trim="projectQuery" @keyup.enter="loadProjects(1)" placeholder="project id / url" />
-          </div>
-          <div class="field" v-if="tags.length">
-            <label>按标签筛选(任一命中)</label>
-            <div class="tag-filter-chips">
-              <button
-                type="button"
-                class="tag-chip tag-toggle"
-                v-for="t in tags"
-                :key="t.tag_id"
-                :class="[tagColorClass(t.name), { selected: projectTagFilter.includes(t.tag_id) }]"
-                @click="toggleProjectTagFilter(t.tag_id)"
-              >{{ t.name }}</button>
-              <button v-if="projectTagFilter.length" type="button" class="ghost btn-sm" @click="clearProjectTagFilter">清除</button>
-            </div>
+            <label>名称 *</label>
+            <input v-model.trim="channelForm.name" placeholder="如:后端一组飞书群" maxlength="64" />
           </div>
           <div class="field">
-            <label>Actions</label>
-            <div class="inline-actions">
-              <button class="ghost" @click="loadProjects(1)">Search</button>
-            </div>
+            <label>类型 *</label>
+            <select v-model="channelForm.type">
+              <option value="feishu">飞书</option>
+              <option value="wechat">企业微信</option>
+              <option value="dingtalk">钉钉</option>
+            </select>
           </div>
+          <div class="field field-span-2">
+            <label>Webhook URL {{ channelForm.editingId ? '(留空保持不变)' : '*' }}</label>
+            <input v-model.trim="channelForm.webhook_url" :placeholder="channelForm.editingId ? channelForm.urlMasked : 'https://open.feishu.cn/open-apis/bot/v2/hook/xxx'" />
+          </div>
+          <div class="field field-span-2">
+            <label>加签密钥 {{ channelForm.editingId ? '(留空保持不变)' : '(可选)' }}</label>
+            <input v-model.trim="channelForm.sign_secret" :placeholder="channelForm.editingId ? channelForm.secretMasked : '机器人安全设置里的加签密钥'" />
+          </div>
+          <div v-if="channelError" class="err field-span-2">{{ channelError }}</div>
+        </form>
+        <div class="modal-foot">
+          <button class="ghost" type="button" @click="cancelChannelForm">取消</button>
+          <button type="submit" :disabled="channelSaving" @click="submitChannel">{{ channelForm.editingId ? '保存' : '创建' }}</button>
         </div>
+      </div>
+    </div>
 
-        <form class="form-grid" @submit.prevent="submitProject">
+    <!-- ── 模态框:项目标签 添加/重命名 ───────────────────── -->
+    <div class="modal-mask" v-if="tagModal.open" @click.self="cancelTagModal">
+      <div class="modal modal-sm">
+        <div class="modal-head">
+          <span>{{ tagModal.editingId ? '重命名标签' : '添加标签' }}</span>
+          <button class="ghost btn-sm" type="button" @click="cancelTagModal">✕</button>
+        </div>
+        <form class="modal-body" @submit.prevent="submitTagModal">
           <div class="field">
-            <label>手动添加:Project ID *</label>
+            <label>标签名 *</label>
+            <input v-model.trim="tagModal.name" maxlength="32" placeholder="如:核心系统 / 支付 / 前端" />
+          </div>
+          <div v-if="tagError" class="err">{{ tagError }}</div>
+        </form>
+        <div class="modal-foot">
+          <button class="ghost" type="button" @click="cancelTagModal">取消</button>
+          <button type="submit" :disabled="tagSaving" @click="submitTagModal">{{ tagModal.editingId ? '保存' : '添加' }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 模态框:手动添加项目 ───────────────────────────── -->
+    <div class="modal-mask" v-if="projectCreateModal.open" @click.self="cancelProjectCreate">
+      <div class="modal">
+        <div class="modal-head">
+          <span>手动添加项目</span>
+          <button class="ghost btn-sm" type="button" @click="cancelProjectCreate">✕</button>
+        </div>
+        <form class="modal-body form-grid" @submit.prevent="submitProject">
+          <div class="field">
+            <label>Project ID *</label>
             <input v-model.trim="projectForm.project_id" placeholder="GitLab project id(数字)" />
           </div>
           <div class="field">
             <label>项目 URL(可选)</label>
             <input v-model.trim="projectForm.project_url" placeholder="https://gitlab.example.com/group/repo" />
           </div>
-          <div class="field">
+          <div class="field field-span-2">
             <label>绑定推送配置(可选)</label>
             <select v-model="projectForm.channel_id">
               <option value="">暂不绑定</option>
               <option v-for="c in channels" :key="c.channel_id" :value="c.channel_id">{{ c.name }} ({{ typeLabel(c.type) }})</option>
             </select>
           </div>
-          <div class="field">
-            <label>Actions</label>
-            <div class="inline-actions">
-              <button type="submit" :disabled="projectSaving">添加</button>
-            </div>
-          </div>
           <div v-if="projectError" class="err field-span-2">{{ projectError }}</div>
         </form>
-
-        <div class="table-wrap">
-          <table class="tasks-table projects-table">
-            <thead>
-              <tr>
-                <th>Project ID</th>
-                <th>项目 URL</th>
-                <th class="col-project-tags">标签</th>
-                <th>推送配置</th>
-                <th>更新时间</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="p in projectData.items" :key="p.project_id" :class="{ 'tag-editing-row': editingTagsFor === p.project_id }">
-                <td>{{ p.project_id }}</td>
-                <td><span class="project-url">{{ p.project_url || '-' }}</span></td>
-                <td class="col-project-tags">
-                  <div v-if="editingTagsFor === p.project_id" class="tag-editor">
-                    <template v-if="tags.length">
-                      <button
-                        type="button"
-                        class="tag-chip tag-toggle"
-                        v-for="t in tags"
-                        :key="t.tag_id"
-                        :class="[tagColorClass(t.name), { selected: tagEditSelection.includes(t.tag_id) }]"
-                        @click="toggleTagEditSelection(t.tag_id)"
-                      >{{ t.name }}</button>
-                    </template>
-                    <span v-else class="muted">暂无标签可选,请先在上方维护。</span>
-                    <div class="inline-actions tag-editor-actions">
-                      <button class="btn-sm" @click="saveProjectTags(p)" :disabled="projectTagsSaving">{{ projectTagsSaving ? '保存中...' : '保存' }}</button>
-                      <button class="ghost btn-sm" @click="cancelProjectTagsEdit">取消</button>
-                    </div>
-                  </div>
-                  <div v-else class="project-tags">
-                    <span v-for="tg in p.tags" :key="tg.tag_id" class="tag-chip" :class="tagColorClass(tg.name)">{{ tg.name }}</span>
-                    <span v-if="!p.tags || !p.tags.length" class="muted">-</span>
-                    <button class="ghost btn-sm" @click="startProjectTagsEdit(p)">{{ (p.tags && p.tags.length) ? '编辑' : '打标签' }}</button>
-                  </div>
-                </td>
-                <td>
-                  <select class="bind-select" :value="p.channel ? p.channel.channel_id : ''" @change="bindProject(p, $event.target.value)">
-                    <option value="">未绑定(使用全局配置)</option>
-                    <option v-for="c in channels" :key="c.channel_id" :value="c.channel_id">{{ c.name }} ({{ typeLabel(c.type) }})</option>
-                  </select>
-                </td>
-                <td>{{ compactTime(p.updated_at) }}</td>
-              </tr>
-              <tr v-if="projectData.items.length === 0">
-                <td colspan="5" class="muted">暂无项目。</td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="modal-foot">
+          <button class="ghost" type="button" @click="cancelProjectCreate">取消</button>
+          <button type="submit" :disabled="projectSaving" @click="submitProject">添加</button>
         </div>
+      </div>
+    </div>
 
-        <div class="pager">
-          <div>Page {{ projectPage }} / {{ projectPages }}</div>
-          <div class="pager-actions">
-            <button class="ghost" :disabled="projectPage <= 1" @click="loadProjects(projectPage - 1)">Prev</button>
-            <button class="ghost" :disabled="projectPage >= projectPages" @click="loadProjects(projectPage + 1)">Next</button>
+    <!-- ── 模态框:项目配置(推送绑定 + 标签) ─────────────── -->
+    <div class="modal-mask" v-if="projectConfigModal.open" @click.self="cancelProjectConfig">
+      <div class="modal">
+        <div class="modal-head">
+          <span>项目配置 - {{ projectConfigModal.projectId }}</span>
+          <button class="ghost btn-sm" type="button" @click="cancelProjectConfig">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="field">
+            <label>推送配置</label>
+            <select v-model="projectConfigModal.channelId">
+              <option value="">未绑定(使用全局配置)</option>
+              <option v-for="c in channels" :key="c.channel_id" :value="c.channel_id">{{ c.name }} ({{ typeLabel(c.type) }})</option>
+            </select>
+          </div>
+          <div class="field" v-if="tags.length">
+            <label>标签(可多选)</label>
+            <div class="tag-filter-chips">
+              <button
+                type="button"
+                class="tag-chip tag-toggle"
+                v-for="t in tags"
+                :key="t.tag_id"
+                :class="[tagColorClass(t.name), { selected: projectConfigModal.tagSelection.includes(t.tag_id) }]"
+                @click="toggleConfigTagSelection(t.tag_id)"
+              >{{ t.name }}</button>
+            </div>
+          </div>
+          <div class="field" v-else>
+            <label>标签</label>
+            <span class="muted">暂无标签可选,请先在「项目标签」页维护。</span>
           </div>
         </div>
-        <div v-if="projectBindError" class="err">{{ projectBindError }}</div>
-      </section>
-      </template>
-    </main>
+        <div class="modal-foot">
+          <button class="ghost" type="button" @click="cancelProjectConfig">取消</button>
+          <button :disabled="projectConfigSaving" @click="saveProjectConfig">{{ projectConfigSaving ? '保存中...' : '保存' }}</button>
+        </div>
+        <div v-if="projectBindError" class="err modal-error">{{ projectBindError }}</div>
+      </div>
+    </div>
+
+    <!-- ── 模态框:通用确认 ───────────────────────────────── -->
+    <div class="modal-mask" v-if="confirmModal.open" @click.self="closeConfirm">
+      <div class="modal modal-sm">
+        <div class="modal-head">
+          <span>{{ confirmModal.title }}</span>
+          <button class="ghost btn-sm" type="button" @click="closeConfirm">✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="confirm-text">{{ confirmModal.message }}</p>
+        </div>
+        <div class="modal-foot">
+          <button class="ghost" type="button" @click="closeConfirm">取消</button>
+          <button class="danger" :disabled="confirmModal.loading" @click="confirmModalAction">{{ confirmModal.loading ? '处理中...' : (confirmModal.confirmText || '确定') }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 
 </body>
