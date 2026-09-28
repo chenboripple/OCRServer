@@ -1,0 +1,72 @@
+tests/test_console.py
+  4b11c7738c1d4fc3 429-519
+app/storage/repositories/token_repository.py
+  4b11c7738c1d4fc3 1-109
+app/static/console/console.js
+  4b11c7738c1d4fc3 50-56,70,72,121,258-362,486,509-511,534,540,563,566,572-580,800,802
+app/schemas.py
+  4b11c7738c1d4fc3 135,150-196
+tests/test_runtime.py
+  4b11c7738c1d4fc3 1-51
+app/orchestrator.py
+  4b11c7738c1d4fc3 12,92-93,215-217
+app/repost.py
+  4b11c7738c1d4fc3 10,32-33
+app/storage/models.py
+  4b11c7738c1d4fc3 19-27,34
+tests/test_storage.py
+  4b11c7738c1d4fc3 289-407
+app/storage/connection.py
+  4b11c7738c1d4fc3 199-212,218,221-222,225-228,231-232
+app/webhooks.py
+  4b11c7738c1d4fc3 12,73-74
+app/static/console/console.html
+  4b11c7738c1d4fc3 7,9,33,358-359,402,407,413-415,431-433,435,438,510-561,627-656,701-707,732-738
+app/routes/console.py
+  4b11c7738c1d4fc3 3-4,11,14-26,222-292,361-363,368-369,374,383-387,393,400-413
+app/storage/__init__.py
+  4b11c7738c1d4fc3 8,14,25,71,73
+tests/test_main_integration.py
+  4b11c7738c1d4fc3 18,94
+app/storage/repositories/project_repository.py
+  4b11c7738c1d4fc3 18,89-90,93,110-113,162-195
+app/gitlab_client.py
+  4b11c7738c1d4fc3 170-177
+app/static/console/console.css
+  4b11c7738c1d4fc3 723,861-862
+app/runtime.py
+  4b11c7738c1d4fc3 27-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "3e5d5e675e3c090e1bf05f3f500571fbb6eb8da0",
+  "prompts": {
+    "1caeffd3e80450f5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8f581463-138c-470b-b474-aca7953f98f4",
+        "model": "claude-opus"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    },
+    "4b11c7738c1d4fc3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "99b6aead-f55d-4598-961e-f9522464a5e0",
+        "model": "claude-opus"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 910,
+      "total_deletions": 45,
+      "accepted_lines": 2465,
+      "overriden_lines": 0
+    }
+  }
+}
