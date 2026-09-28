@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OCR Server Console</title>
-  <link rel="stylesheet" href="console/assets/console.css?v=20260924-2" />
+  <link rel="stylesheet" href="console/assets/console.css?v=20260928-1" />
   <script defer src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-  <script defer src="console/assets/console.js?v=20260924-2"></script>
+  <script defer src="console/assets/console.js?v=20260928-1"></script>
 </head>
 <body>
   <div id="app">
@@ -30,6 +30,7 @@
       <button class="tab" :class="{ active: activeTab === 'review' }" @click="switchTab('review')">审核看板</button>
       <button class="tab" :class="{ active: activeTab === 'projects' }" @click="switchTab('projects')">项目清单</button>
       <button class="tab" :class="{ active: activeTab === 'channels' }" @click="switchTab('channels')">推送配置</button>
+      <button class="tab" :class="{ active: activeTab === 'tokens' }" @click="switchTab('tokens')">Git 令牌</button>
       <button class="tab" :class="{ active: activeTab === 'tags' }" @click="switchTab('tags')">项目标签</button>
     </nav>
 
@@ -354,8 +355,8 @@
           </div>
         </div>
         <p class="muted config-hint">
-          审核任务到达时自动登记;也可手动添加。「配置」里可绑定推送通道与打标签;
-          未绑定推送的项目回退全局 NOTIFY_* 环境变量配置。
+          审核任务到达时自动登记;也可手动添加。「配置」里可绑定推送通道、Git 令牌与打标签;
+          未绑定推送的项目回退全局 NOTIFY_* 环境变量配置,未绑定令牌的项目回退全局 GITLAB_TOKEN。
         </p>
 
         <div class="toolbar">
@@ -398,16 +399,20 @@
           <table class="tasks-table projects-table">
             <thead>
               <tr>
+                <th class="col-actions">操作</th>
                 <th class="col-project-name">Project</th>
                 <th>项目 URL</th>
                 <th class="col-project-tags">标签</th>
                 <th>推送配置</th>
+                <th>Git 令牌</th>
                 <th>更新时间</th>
-                <th class="col-actions">操作</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="p in projectData.items" :key="p.project_id">
+                <td class="config-actions">
+                  <button class="ghost btn-sm" @click="openProjectConfig(p)">配置</button>
+                </td>
                 <td class="col-project-name">
                   <div class="project-name">{{ projectName(p) }}</div>
                   <div class="muted">{{ p.project_id }}</div>
@@ -423,13 +428,14 @@
                   <span v-if="p.channel">{{ p.channel.name }} ({{ typeLabel(p.channel.type) }})</span>
                   <span v-else class="muted">未绑定(全局配置)</span>
                 </td>
-                <td>{{ compactTime(p.updated_at) }}</td>
-                <td class="config-actions">
-                  <button class="ghost btn-sm" @click="openProjectConfig(p)">配置</button>
+                <td>
+                  <span v-if="p.git_token">{{ p.git_token.name }}</span>
+                  <span v-else class="muted">未绑定(全局 GITLAB_TOKEN)</span>
                 </td>
+                <td>{{ compactTime(p.updated_at) }}</td>
               </tr>
               <tr v-if="projectData.items.length === 0">
-                <td colspan="6" class="muted">暂无项目。</td>
+                <td colspan="7" class="muted">暂无项目。</td>
               </tr>
             </tbody>
           </table>
@@ -501,6 +507,58 @@
       </section>
       </template>
 
+      <template v-else-if="activeTab === 'tokens'">
+      <section class="card">
+        <div class="section-title">
+          <span>Git 令牌</span>
+          <div class="section-actions">
+            <span class="muted">{{ tokens.length }} 项</span>
+            <button class="ghost" @click="loadTokens">刷新</button>
+            <button @click="startTokenCreate">新增令牌</button>
+          </div>
+        </div>
+        <p class="muted config-hint">
+          维护可复用的 GitLab 访问令牌(需 read_repository + api scope),在「项目清单」的配置里绑定到项目。
+          绑定后该项目的代码拉取与 MR 评论均使用此令牌,未绑定回退全局 GITLAB_TOKEN。
+          令牌保存后仅展示尾 4 位;编辑时留空表示保持不变。
+        </p>
+
+        <div class="table-wrap">
+          <table class="tasks-table tokens-table">
+            <thead>
+              <tr>
+                <th>名称</th>
+                <th>Token</th>
+                <th>绑定项目数</th>
+                <th>更新时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="t in tokens" :key="t.git_token_id">
+                <td>{{ t.name }}</td>
+                <td><span class="masked">{{ t.token_masked }}</span></td>
+                <td>{{ t.bound_project_count }}</td>
+                <td>{{ compactTime(t.updated_at) }}</td>
+                <td class="config-actions">
+                  <button class="ghost btn-sm" :disabled="tokenTesting === t.git_token_id" @click="testToken(t)">{{ tokenTesting === t.git_token_id ? '测试中...' : '测试' }}</button>
+                  <button class="ghost btn-sm" @click="editToken(t)">编辑</button>
+                  <button class="ghost btn-sm btn-danger" @click="askDeleteToken(t)">删除</button>
+                </td>
+              </tr>
+              <tr v-if="tokens.length === 0">
+                <td colspan="5" class="muted">暂无 Git 令牌。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-if="tokenTestResult" class="muted copied-tip" :class="tokenTestResult.ok ? 'ok' : 'err'">
+          {{ tokenTestResult.ok ? '✅ 令牌有效(' + tokenTestResult.username + ')' : '❌ ' + tokenTestResult.error }}
+        </div>
+        <div v-if="tokenError" class="err config-hint">{{ tokenError }}</div>
+      </section>
+      </template>
+
       <template v-else>
       <section class="card">
         <div class="section-title">
@@ -566,6 +624,36 @@
       </div>
     </div>
 
+    <!-- ── 模态框:Git 令牌 新增/编辑 ─────────────────────── -->
+    <div class="modal-mask" v-if="tokenForm.open" @click.self="cancelTokenForm">
+      <div class="modal modal-sm">
+        <div class="modal-head">
+          <span>{{ tokenForm.editingId ? '编辑 Git 令牌' : '新增 Git 令牌' }}</span>
+          <button class="ghost btn-sm" type="button" @click="cancelTokenForm">✕</button>
+        </div>
+        <form class="modal-body" @submit.prevent="submitToken">
+          <div class="field">
+            <label>名称 *</label>
+            <input v-model.trim="tokenForm.name" placeholder="如:某某项目组 token" maxlength="64" />
+          </div>
+          <div class="field">
+            <label>Token {{ tokenForm.editingId ? '(留空保持不变)' : '*' }}</label>
+            <input
+              v-model.trim="tokenForm.token"
+              type="password"
+              autocomplete="new-password"
+              :placeholder="tokenForm.editingId ? tokenForm.tokenMasked : 'glpat-… 或 Personal/Project Access Token'"
+            />
+          </div>
+          <div v-if="tokenError" class="err">{{ tokenError }}</div>
+        </form>
+        <div class="modal-foot">
+          <button class="ghost" type="button" @click="cancelTokenForm">取消</button>
+          <button type="submit" :disabled="tokenSaving" @click="submitToken">{{ tokenForm.editingId ? '保存' : '创建' }}</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ── 模态框:项目标签 添加/重命名 ───────────────────── -->
     <div class="modal-mask" v-if="tagModal.open" @click.self="cancelTagModal">
       <div class="modal modal-sm">
@@ -610,6 +698,13 @@
               <option v-for="c in channels" :key="c.channel_id" :value="c.channel_id">{{ c.name }} ({{ typeLabel(c.type) }})</option>
             </select>
           </div>
+          <div class="field field-span-2">
+            <label>绑定 Git 令牌(可选)</label>
+            <select v-model="projectForm.git_token_id">
+              <option value="">暂不绑定</option>
+              <option v-for="t in tokens" :key="t.git_token_id" :value="t.git_token_id">{{ t.name }}</option>
+            </select>
+          </div>
           <div v-if="projectError" class="err field-span-2">{{ projectError }}</div>
         </form>
         <div class="modal-foot">
@@ -632,6 +727,13 @@
             <select v-model="projectConfigModal.channelId">
               <option value="">未绑定(使用全局配置)</option>
               <option v-for="c in channels" :key="c.channel_id" :value="c.channel_id">{{ c.name }} ({{ typeLabel(c.type) }})</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Git 令牌</label>
+            <select v-model="projectConfigModal.tokenId">
+              <option value="">未绑定(使用全局 GITLAB_TOKEN)</option>
+              <option v-for="t in tokens" :key="t.git_token_id" :value="t.git_token_id">{{ t.name }}</option>
             </select>
           </div>
           <div class="field" v-if="tags.length">

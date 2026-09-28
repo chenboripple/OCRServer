@@ -1,16 +1,29 @@
 """Console APIs and Vue3 page entry.
 
-任务/看板查询只读;项目配置(推送配置 + 项目标签 + 项目清单)提供读写,
-敏感字段(webhook_url / sign_secret)出参一律脱敏,只展示尾 4 位。
+任务/看板查询只读;项目配置(推送配置 + Git 令牌 + 项目标签 + 项目清单)提供读写,
+敏感字段(webhook_url / sign_secret / token)出参一律脱敏,只展示尾 4 位。
 """
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
+from .. import config
 from .. import notifier
 from .. import storage
-from ..schemas import ChannelCreate, ChannelUpdate, ProjectBind, ProjectCreate, ProjectTagsSet, TagCreate, TagUpdate
+from ..gitlab_client import GitLabClient, GitLabError
+from ..schemas import (
+    ChannelCreate,
+    ChannelUpdate,
+    GitTokenBind,
+    GitTokenCreate,
+    GitTokenUpdate,
+    ProjectBind,
+    ProjectCreate,
+    ProjectTagsSet,
+    TagCreate,
+    TagUpdate,
+)
 
 router = APIRouter()
 
@@ -206,6 +219,77 @@ def test_channel(channel_id: str):
     return {"ok": True}
 
 
+# ── 配置页:Git 令牌(git_token) ──────────────────────────
+
+def _git_token_payload(token_obj, bound_count: int) -> dict:
+    """Git 令牌出参:token 只给脱敏值,全值永不离开服务端。"""
+    return {
+        "git_token_id": token_obj.git_token_id,
+        "name": token_obj.name,
+        "token_masked": _mask(token_obj.token),
+        "bound_project_count": bound_count,
+        "created_at": token_obj.created_at,
+        "updated_at": token_obj.updated_at,
+    }
+
+
+@router.get("/api/console/tokens")
+def list_tokens():
+    return {"items": [
+        _git_token_payload(t, storage.token_repo.bound_project_count(t.git_token_id))
+        for t in storage.token_repo.list()
+    ]}
+
+
+@router.post("/api/console/tokens", status_code=201)
+def create_token(body: GitTokenCreate):
+    existing = storage.token_repo.get_by_name(body.name)
+    if existing:
+        raise HTTPException(status_code=409, detail=f"同名 Git 令牌已存在: {body.name}")
+    token_obj = storage.token_repo.create(name=body.name, token=body.token)
+    return _git_token_payload(token_obj, 0)
+
+
+@router.put("/api/console/tokens/{git_token_id}")
+def update_token(git_token_id: str, body: GitTokenUpdate):
+    existing = storage.token_repo.get(git_token_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Git token not found")
+    if body.name != existing.name:
+        name_owner = storage.token_repo.get_by_name(body.name)
+        if name_owner and name_owner.git_token_id != git_token_id:
+            raise HTTPException(status_code=409, detail=f"同名 Git 令牌已存在: {body.name}")
+    # token 为 None(留空)时仓储保持原值
+    token_obj = storage.token_repo.update(git_token_id, name=body.name, token=body.token)
+    if not token_obj:
+        raise HTTPException(status_code=404, detail="Git token not found")
+    return _git_token_payload(token_obj, storage.token_repo.bound_project_count(git_token_id))
+
+
+@router.delete("/api/console/tokens/{git_token_id}", status_code=204)
+def delete_token(git_token_id: str):
+    if not storage.token_repo.get(git_token_id):
+        raise HTTPException(status_code=404, detail="Git token not found")
+    # 绑定该项目的外键 ON DELETE SET NULL 自动解绑(项目回退全局 GITLAB_TOKEN)
+    storage.token_repo.delete(git_token_id)
+
+
+@router.post("/api/console/tokens/{git_token_id}/test")
+def test_token(git_token_id: str):
+    """用服务端存储的令牌调一次 GitLab /user,凭据不经页面。"""
+    token_obj = storage.token_repo.get(git_token_id)
+    if not token_obj:
+        raise HTTPException(status_code=404, detail="Git token not found")
+    if not config.GITLAB_URL:
+        return {"ok": False, "error": "GITLAB_URL 未配置"}
+    try:
+        gl = GitLabClient(config.GITLAB_URL, token_obj.token)
+        user = gl.get_current_user()
+        return {"ok": True, "username": user.get("username", "")}
+    except GitLabError as e:
+        return {"ok": False, "error": str(e)}
+
+
 # ── 配置页:项目标签(project_tag) ────────────────────────
 
 def _tag_payload(tag, project_count: int) -> dict:
@@ -274,16 +358,20 @@ def list_projects(
 def create_project(body: ProjectCreate):
     if body.channel_id and not storage.channel_repo.get(body.channel_id):
         raise HTTPException(status_code=404, detail="Channel not found")
-    # 幂等:重复添加只刷新 project_url;显式传了 channel_id 才覆盖绑定
+    if body.git_token_id and not storage.token_repo.get(body.git_token_id):
+        raise HTTPException(status_code=404, detail="Git token not found")
+    # 幂等:重复添加只刷新 project_url;显式传了 channel_id/git_token_id 才覆盖绑定
     existing = storage.project_repo.get(body.project_id)
     storage.project_repo.upsert(body.project_id, body.project_url)
     if body.channel_id is not None and (not existing or existing.channel_id != body.channel_id):
         storage.project_repo.bind(body.project_id, body.channel_id)
+    if body.git_token_id is not None and (not existing or existing.git_token_id != body.git_token_id):
+        storage.project_repo.bind_token(body.project_id, body.git_token_id)
     return _project_row(body.project_id)
 
 
 def _project_row(project_id: str) -> dict:
-    """取项目单行(带绑定通道与标签);不存在抛 404。"""
+    """取项目单行(带绑定通道/令牌与标签);不存在抛 404。"""
     project = storage.project_repo.get(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -292,15 +380,35 @@ def _project_row(project_id: str) -> dict:
         c = storage.channel_repo.get(project.channel_id)
         if c:
             channel = {"channel_id": c.channel_id, "name": c.name, "type": c.type}
+    git_token = None
+    if project.git_token_id:
+        t = storage.token_repo.get(project.git_token_id)
+        if t:
+            git_token = {"git_token_id": t.git_token_id, "name": t.name}
     tags = storage.tag_repo.project_tag_map([project_id]).get(project_id, [])
     return {
         "project_id": project.project_id,
         "project_url": project.project_url,
         "channel": channel,
+        "git_token": git_token,
         "tags": tags,
         "created_at": project.created_at,
         "updated_at": project.updated_at,
     }
+
+
+@router.put("/api/console/projects/{project_id}/token")
+def bind_project_token(project_id: str, body: GitTokenBind):
+    project = storage.project_repo.get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if body.git_token_id and not storage.token_repo.get(body.git_token_id):
+        raise HTTPException(status_code=404, detail="Git token not found")
+    try:
+        storage.project_repo.bind_token(project_id, body.git_token_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return _project_row(project_id)
 
 
 @router.put("/api/console/projects/{project_id}/channel")

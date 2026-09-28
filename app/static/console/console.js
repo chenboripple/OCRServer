@@ -47,6 +47,13 @@ createApp({
       channelSaving: false,
       channelTesting: "",
       channelTestResult: null,
+      // ── 配置页:Git 令牌 ──
+      tokens: [],
+      tokenForm: { open: false, editingId: "", name: "", token: "", tokenMasked: "" },
+      tokenError: "",
+      tokenSaving: false,
+      tokenTesting: "",
+      tokenTestResult: null,
       // ── 配置页:项目标签 ──
       tags: [],
       tagSaving: false,
@@ -60,9 +67,9 @@ createApp({
       projectChannelFilter: "",  // ""=全部 / "none"=未绑定 / channel_id
       projectTagFilter: [],      // 标签筛选(可多选,任一命中)
       projectCreateModal: { open: false },
-      projectConfigModal: { open: false, projectId: "", channelId: "", tagSelection: [] },
+      projectConfigModal: { open: false, projectId: "", channelId: "", tokenId: "", tagSelection: [] },
       projectConfigSaving: false,
-      projectForm: { project_id: "", project_url: "", channel_id: "" },
+      projectForm: { project_id: "", project_url: "", channel_id: "", git_token_id: "" },
       projectError: "",
       projectSaving: false,
       projectBindError: "",
@@ -111,7 +118,7 @@ createApp({
       this.loadConfigData();
     },
     async loadConfigData() {
-      await Promise.all([this.loadChannels(), this.loadProjects(1), this.loadTags()]);
+      await Promise.all([this.loadChannels(), this.loadTokens(), this.loadProjects(1), this.loadTags()]);
     },
     async loadChannels() {
       try {
@@ -248,6 +255,111 @@ createApp({
         this.channelTestResult = null;
       }, 5000);
     },
+    // ── 配置页:Git 令牌 ────────────────────────────────
+    async loadTokens() {
+      try {
+        const resp = await fetch(this.apiUrl("/api/console/tokens"));
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+        this.tokens = data.items || [];
+      } catch (e) {
+        this.tokenError = `加载 Git 令牌失败: ${String(e)}`;
+      }
+    },
+    startTokenCreate() {
+      this.tokenForm = { open: true, editingId: "", name: "", token: "", tokenMasked: "" };
+      this.tokenError = "";
+    },
+    editToken(t) {
+      this.tokenForm = {
+        open: true,
+        editingId: t.git_token_id,
+        name: t.name,
+        token: "",
+        tokenMasked: t.token_masked
+      };
+      this.tokenError = "";
+    },
+    cancelTokenForm() {
+      this.tokenForm = { open: false, editingId: "", name: "", token: "", tokenMasked: "" };
+      this.tokenError = "";
+    },
+    async submitToken() {
+      this.tokenError = "";
+      const form = this.tokenForm;
+      if (!form.name) {
+        this.tokenError = "名称必填";
+        return;
+      }
+      if (!form.editingId && !form.token) {
+        this.tokenError = "Token 必填";
+        return;
+      }
+      const payload = { name: form.name };
+      // 编辑时留空 = 保持原值,不传该字段
+      if (form.token) {
+        payload.token = form.token;
+      }
+      this.tokenSaving = true;
+      try {
+        const resp = form.editingId
+          ? await fetch(this.apiUrl(`/api/console/tokens/${encodeURIComponent(form.editingId)}`), {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            })
+          : await fetch(this.apiUrl("/api/console/tokens"), {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            });
+        if (!resp.ok) {
+          const detail = await resp.json().catch(() => ({}));
+          throw new Error(detail.detail || `HTTP ${resp.status}`);
+        }
+        this.cancelTokenForm();
+        await this.loadTokens();
+      } catch (e) {
+        this.tokenError = `保存失败: ${String(e)}`;
+      } finally {
+        this.tokenSaving = false;
+      }
+    },
+    askDeleteToken(t) {
+      const bound = t.bound_project_count > 0 ? `删除后 ${t.bound_project_count} 个绑定项目将回退全局 GITLAB_TOKEN。` : "";
+      this.askConfirm("删除 Git 令牌", `确定删除「${t.name}」?${bound}`, "删除", async () => {
+        try {
+          const resp = await fetch(this.apiUrl(`/api/console/tokens/${encodeURIComponent(t.git_token_id)}`), { method: "DELETE" });
+          if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}`);
+          }
+          await this.loadTokens();
+          await this.loadProjects(this.projectPage);
+        } catch (e) {
+          this.tokenError = `删除失败: ${String(e)}`;
+        }
+      });
+    },
+    async testToken(t) {
+      this.tokenTesting = t.git_token_id;
+      this.tokenTestResult = null;
+      try {
+        const resp = await fetch(this.apiUrl(`/api/console/tokens/${encodeURIComponent(t.git_token_id)}/test`), { method: "POST" });
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        this.tokenTestResult = await resp.json();
+      } catch (e) {
+        this.tokenTestResult = { ok: false, error: String(e) };
+      } finally {
+        this.tokenTesting = "";
+      }
+      window.setTimeout(() => {
+        this.tokenTestResult = null;
+      }, 5000);
+    },
     // ── 配置页:项目标签 ────────────────────────────────
     async loadTags() {
       try {
@@ -371,7 +483,7 @@ createApp({
       }
     },
     openProjectCreate() {
-      this.projectForm = { project_id: "", project_url: "", channel_id: "" };
+      this.projectForm = { project_id: "", project_url: "", channel_id: "", git_token_id: "" };
       this.projectError = "";
       this.projectCreateModal = { open: true };
     },
@@ -393,6 +505,9 @@ createApp({
         };
         if (this.projectForm.channel_id) {
           payload.channel_id = this.projectForm.channel_id;
+        }
+        if (this.projectForm.git_token_id) {
+          payload.git_token_id = this.projectForm.git_token_id;
         }
         const resp = await fetch(this.apiUrl("/api/console/projects"), {
           method: "POST",
@@ -416,12 +531,13 @@ createApp({
         open: true,
         projectId: p.project_id,
         channelId: p.channel ? p.channel.channel_id : "",
+        tokenId: p.git_token ? p.git_token.git_token_id : "",
         tagSelection: (p.tags || []).map((t) => t.tag_id)
       };
       this.projectBindError = "";
     },
     cancelProjectConfig() {
-      this.projectConfigModal = { open: false, projectId: "", channelId: "", tagSelection: [] };
+      this.projectConfigModal = { open: false, projectId: "", channelId: "", tokenId: "", tagSelection: [] };
       this.projectBindError = "";
     },
     toggleConfigTagSelection(tagId) {
@@ -444,14 +560,23 @@ createApp({
           const detail = await resp.json().catch(() => ({}));
           throw new Error(detail.detail || `HTTP ${resp.status}`);
         }
-        const resp2 = await fetch(this.apiUrl(`/api/console/projects/${encodeURIComponent(m.projectId)}/tags`), {
+        const resp2 = await fetch(this.apiUrl(`/api/console/projects/${encodeURIComponent(m.projectId)}/token`), {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tag_ids: m.tagSelection })
+          body: JSON.stringify({ git_token_id: m.tokenId || null })
         });
         if (!resp2.ok) {
           const detail = await resp2.json().catch(() => ({}));
           throw new Error(detail.detail || `HTTP ${resp2.status}`);
+        }
+        const resp3 = await fetch(this.apiUrl(`/api/console/projects/${encodeURIComponent(m.projectId)}/tags`), {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tag_ids: m.tagSelection })
+        });
+        if (!resp3.ok) {
+          const detail = await resp3.json().catch(() => ({}));
+          throw new Error(detail.detail || `HTTP ${resp3.status}`);
         }
         this.cancelProjectConfig();
         await this.loadProjects(this.projectPage);
@@ -672,9 +797,9 @@ createApp({
       const params = new URLSearchParams(window.location.search);
       const read = (k, fallback = "") => params.get(k) ?? fallback;
 
-      // 页签:projects | channels | tags;旧链接 tab=config 归入 projects
+      // 页签:projects | channels | tokens | tags;旧链接 tab=config 归入 projects
       const tab = read("tab", "review");
-      this.activeTab = ["projects", "channels", "tags"].includes(tab) ? tab : (tab === "config" ? "projects" : "review");
+      this.activeTab = ["projects", "channels", "tokens", "tags"].includes(tab) ? tab : (tab === "config" ? "projects" : "review");
 
       this.filters.status = read("status");
       this.filters.source = read("source");

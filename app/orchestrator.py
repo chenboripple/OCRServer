@@ -9,7 +9,7 @@ from . import reviewer
 from . import storage
 from .repost import post_to_gitlab
 from .rule_updater import review_config_lock, update_config_for_review
-from .runtime import executor, repo_cache, get_gitlab
+from .runtime import executor, repo_cache, get_project_gitlab
 from .schemas import ReviewRequest, ReviewResponse
 
 log = logging.getLogger("ocr-server")
@@ -89,7 +89,8 @@ def do_review_sync(req: ReviewRequest) -> ReviewResponse:
 
     clone_url = req.project_url
     git_env = None
-    gl = get_gitlab()
+    # 项目绑定的 Git 令牌优先(拉代码 + MR 评论),未绑定回退全局 GITLAB_TOKEN
+    gl = get_project_gitlab(req.project_id)
     if gl:
         log.info(f"GitLab 客户端已初始化，进行 URL 转换")
         clone_url = gl.clone_url(req.project_url)
@@ -211,7 +212,9 @@ def do_review_async(task_id: str):
 
     log.info(f"Starting async review for task {task_id}, MR {task.mr_iid}")
 
-    gl = get_gitlab()
+    # 项目绑定的 Git 令牌优先(拉代码 + MR 评论),未绑定回退全局 GITLAB_TOKEN。
+    # claim 后按持久化的 task.project_id 现查,恢复/补偿路径也能拿到最新绑定。
+    gl = get_project_gitlab(task.project_id)
 
     # 从队列取回后先校验 MR 是否仍 open;已关闭/合并则取消,避免白跑 ocr(省 LLM 成本)
     if gl and _check_mr_open(gl, task.project_id, task.mr_iid) is False:

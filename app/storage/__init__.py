@@ -5,12 +5,13 @@
 新代码可直接用 storage.task_repo / storage.webhook_repo / storage.service。
 """
 from .connection import _db, init_db
-from .models import NotifyChannel, ProjectTag, ReviewProject, ReviewTask
+from .models import GitToken, NotifyChannel, ProjectTag, ReviewProject, ReviewTask
 from .repositories.channel_repository import ChannelRepository
 from .repositories.console_repository import ConsoleRepository
 from .repositories.project_repository import ProjectRepository
 from .repositories.tag_repository import TagRepository
 from .repositories.task_repository import TaskRepository
+from .repositories.token_repository import TokenRepository
 from .repositories.webhook_repository import WebhookEventRepository
 from .service import ReviewService
 
@@ -21,6 +22,7 @@ console_repo = ConsoleRepository()
 project_repo = ProjectRepository()
 channel_repo = ChannelRepository()
 tag_repo = TagRepository()
+token_repo = TokenRepository()
 service = ReviewService(task_repo, webhook_repo, project_repo, channel_repo)
 
 
@@ -66,9 +68,9 @@ def record_webhook_event(*args, **kwargs):
 
 
 __all__ = [
-    "ReviewTask", "NotifyChannel", "ReviewProject", "ProjectTag", "init_db",
+    "ReviewTask", "NotifyChannel", "ReviewProject", "ProjectTag", "GitToken", "init_db",
     "task_repo", "webhook_repo", "service",
-    "console_repo", "project_repo", "channel_repo", "tag_repo",
+    "console_repo", "project_repo", "channel_repo", "tag_repo", "token_repo",
     "create_task", "get_task", "claim_task", "update_status",
     "save_review_artifacts",
     "get_queued_tasks", "get_unposted_tasks", "get_queued_count",

@@ -15,7 +15,7 @@ def app_client(tmp_path, monkeypatch):
     storage.init_db()
     # 不真正跑审核;webhook 处理层用到的依赖置为 no-op / None
     monkeypatch.setattr(app.webhooks, "submit_to_executor", lambda task_id: None)
-    monkeypatch.setattr(app.webhooks, "get_gitlab", lambda: None)
+    monkeypatch.setattr(app.webhooks, "get_project_gitlab", lambda project_id: None)
 
     from fastapi.testclient import TestClient
     with TestClient(main.app) as client:
@@ -91,7 +91,7 @@ def _post_review(client, monkeypatch, queued_count):
     from app import storage
 
     fake = _FakeGL()
-    monkeypatch.setattr(app.webhooks, "get_gitlab", lambda: fake)
+    monkeypatch.setattr(app.webhooks, "get_project_gitlab", lambda project_id: fake)
     monkeypatch.setattr(storage, "get_queued_count", lambda: queued_count)
     r = client.post(
         "/gitlab/codeReview",

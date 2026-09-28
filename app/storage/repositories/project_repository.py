@@ -15,6 +15,7 @@ def _row_to_project(row) -> ReviewProject:
         project_id=row["project_id"],
         project_url=row["project_url"] or "",
         channel_id=row["channel_id"],
+        git_token_id=row["git_token_id"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -85,9 +86,11 @@ class ProjectRepository:
             ).fetchone()["cnt"]
             rows = conn.execute(
                 f"""
-                SELECT p.*, c.name AS channel_name, c.type AS channel_type
+                SELECT p.*, c.name AS channel_name, c.type AS channel_type,
+                       gt.name AS token_name
                 FROM review_project p
                 LEFT JOIN notify_channel c ON c.channel_id = p.channel_id
+                LEFT JOIN git_token gt ON gt.git_token_id = p.git_token_id
                 {where}
                 ORDER BY p.updated_at DESC, p.project_id
                 LIMIT ? OFFSET ?
@@ -103,6 +106,10 @@ class ProjectRepository:
                     "channel": (
                         {"channel_id": row["channel_id"], "name": row["channel_name"], "type": row["channel_type"]}
                         if row["channel_id"] else None
+                    ),
+                    "git_token": (
+                        {"git_token_id": row["git_token_id"], "name": row["token_name"]}
+                        if row["git_token_id"] else None
                     ),
                     "tags": tag_map.get(row["project_id"], []),
                     "created_at": row["created_at"],
@@ -152,3 +159,37 @@ class ProjectRepository:
             "webhook_url": row["webhook_url"],
             "sign_secret": row["sign_secret"] or "",
         }
+
+    def bind_token(self, project_id: str, git_token_id: Optional[str]) -> Optional[ReviewProject]:
+        """绑定/解绑 Git 令牌(git_token_id=None 解绑)。项目不存在返回 None;
+        绑定不存在的令牌抛 ValueError(外键之外多一层友好校验)。"""
+        if git_token_id is not None:
+            with _db() as conn:
+                row = conn.execute(
+                    "SELECT 1 FROM git_token WHERE git_token_id = ?", (git_token_id,)
+                ).fetchone()
+                if not row:
+                    raise ValueError(f"git token 不存在: {git_token_id}")
+        now = datetime.datetime.now().isoformat()
+        with _db() as conn:
+            updated = conn.execute(
+                "UPDATE review_project SET git_token_id = ?, updated_at = ? WHERE project_id = ?",
+                (git_token_id, now, project_id),
+            ).rowcount
+            if not updated:
+                return None
+        return self.get(project_id)
+
+    def resolve_git_token(self, project_id: str) -> Optional[str]:
+        """查出项目绑定的 Git 令牌(拉代码/GitLab API 用)。未登记/未绑定返回 None(回退全局 token)。"""
+        with _db() as conn:
+            row = conn.execute(
+                """
+                SELECT t.token
+                FROM review_project p
+                JOIN git_token t ON t.git_token_id = p.git_token_id
+                WHERE p.project_id = ?
+                """,
+                (project_id,),
+            ).fetchone()
+        return row["token"] if row else None

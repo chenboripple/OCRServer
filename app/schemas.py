@@ -132,6 +132,7 @@ class ProjectCreate(BaseModel):
     project_id: str = Field(..., description="GitLab project id")
     project_url: str = Field("", description="仓库 URL(可选)")
     channel_id: Optional[str] = Field(None, description="绑定的推送配置(可选)")
+    git_token_id: Optional[str] = Field(None, description="绑定的 Git 令牌(可选)")
 
     @validator("project_id")
     def validate_project_id(cls, value: str) -> str:
@@ -144,6 +145,55 @@ class ProjectCreate(BaseModel):
 class ProjectBind(BaseModel):
     """绑定/解绑推送配置。channel_id 为 null 表示解绑(回退全局配置)。"""
     channel_id: Optional[str] = Field(None, description="推送配置 id,null 解绑")
+
+
+# ── 配置页:Git 令牌(git_token) ──────────────────────────
+
+class GitTokenCreate(BaseModel):
+    """创建 Git 令牌。"""
+    name: str = Field(..., description="令牌名称(唯一)")
+    token: str = Field(..., description="GitLab 访问令牌(需 read_repository + api scope)")
+
+    @validator("name")
+    def validate_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value or len(value) > _NAME_MAX_LEN:
+            raise ValueError(f"name 不能为空且不超过 {_NAME_MAX_LEN} 字")
+        return value
+
+    @validator("token")
+    def validate_token(cls, value: str) -> str:
+        value = value.strip()
+        if not value or len(value) > _SECRET_MAX_LEN:
+            raise ValueError(f"token 不能为空且不超过 {_SECRET_MAX_LEN} 字")
+        return value
+
+
+class GitTokenUpdate(BaseModel):
+    """更新 Git 令牌。token 不传或传空 = 保持原值不变。"""
+    name: str = Field(..., description="令牌名称(唯一)")
+    token: Optional[str] = Field(None, description="留空保持不变")
+
+    @validator("name")
+    def validate_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value or len(value) > _NAME_MAX_LEN:
+            raise ValueError(f"name 不能为空且不超过 {_NAME_MAX_LEN} 字")
+        return value
+
+    @validator("token")
+    def validate_token(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or not value.strip():
+            return None  # 留空 = 保持不变
+        value = value.strip()
+        if len(value) > _SECRET_MAX_LEN:
+            raise ValueError(f"token 不能超过 {_SECRET_MAX_LEN} 字")
+        return value
+
+
+class GitTokenBind(BaseModel):
+    """绑定/解绑 Git 令牌。git_token_id 为 null 表示解绑(回退全局 GITLAB_TOKEN)。"""
+    git_token_id: Optional[str] = Field(None, description="Git 令牌 id,null 解绑")
 
 
 # ── 配置页:项目标签 ──────────────────────────────────────

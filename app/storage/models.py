@@ -16,11 +16,22 @@ class NotifyChannel:
 
 
 @dataclass
+class GitToken:
+    """Git 访问令牌:绑定到项目后,该项目的代码拉取与 MR 评论使用此令牌。"""
+    git_token_id: str
+    name: str
+    token: str           # 敏感值:仅服务端内部使用,对外返回前必须脱敏
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+@dataclass
 class ReviewProject:
     """项目清单条目:审核任务自动登记或配置页手动添加。"""
     project_id: str
     project_url: str = ""
     channel_id: Optional[str] = None
+    git_token_id: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 

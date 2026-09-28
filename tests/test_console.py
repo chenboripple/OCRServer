@@ -426,3 +426,94 @@ def test_tasks_and_dashboard_filter_by_project_tag(tmp_path, monkeypatch):
         assert dashboard["overview"]["total"] == 1
         # 无标签过滤时全部可见
         assert client.get("/api/console/dashboard").json()["overview"]["total"] == 2
+
+
+# ── 配置页 API:Git 令牌 ──────────────────────────────────
+
+def test_token_api_masking_and_edit_keeps_secret(tmp_path, monkeypatch):
+    with _config_client(tmp_path, monkeypatch) as client:
+        secret = "glpat-secret-9876"
+        resp = client.post("/api/console/tokens", json={"name": "项目组A", "token": secret})
+        assert resp.status_code == 201
+        body = resp.json()
+        # 出参只给脱敏值,全值绝不返回
+        assert body["token_masked"].endswith("9876")
+        assert secret not in resp.text
+        token_id = body["git_token_id"]
+
+        # 列表同样脱敏
+        listing = client.get("/api/console/tokens").json()
+        assert listing["items"][0]["token_masked"].endswith("9876")
+        assert secret not in str(listing)
+
+        # 编辑:token 留空(不传)= 保持原值
+        resp = client.put(f"/api/console/tokens/{token_id}", json={"name": "项目组A改名"})
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "项目组A改名"
+        from app import storage
+        stored = storage.token_repo.get(token_id)
+        assert stored.token == secret
+
+        # 同名 -> 409;空 token 创建 -> 422;更新不存在 -> 404
+        assert client.post("/api/console/tokens", json={"name": "项目组A改名", "token": "x"}).status_code == 409
+        assert client.post("/api/console/tokens", json={"name": "B", "token": "  "}).status_code == 422
+        assert client.put("/api/console/tokens/nope", json={"name": "x"}).status_code == 404
+
+
+def test_project_api_bind_unbind_and_token_delete(tmp_path, monkeypatch):
+    with _config_client(tmp_path, monkeypatch) as client:
+        token = client.post("/api/console/tokens", json={
+            "name": "令牌甲", "token": "glpat-xyz999",
+        }).json()
+        token_id = token["git_token_id"]
+
+        # 手动添加项目并绑定令牌
+        resp = client.post("/api/console/projects", json={
+            "project_id": "42", "project_url": "https://gitlab.example.com/g/p.git",
+            "git_token_id": token_id,
+        })
+        assert resp.status_code == 201
+        assert resp.json()["git_token"]["git_token_id"] == token_id
+
+        # 重复添加幂等,不报错
+        assert client.post("/api/console/projects", json={"project_id": "42"}).status_code == 201
+
+        # 解绑
+        resp = client.put("/api/console/projects/42/token", json={"git_token_id": None})
+        assert resp.status_code == 200
+        assert resp.json()["git_token"] is None
+
+        # 再绑定后删除令牌 -> 项目自动解绑(回退全局 GITLAB_TOKEN)
+        client.put("/api/console/projects/42/token", json={"git_token_id": token_id})
+        resp = client.delete(f"/api/console/tokens/{token_id}")
+        assert resp.status_code == 204
+        projects = client.get("/api/console/projects").json()
+        assert projects["items"][0]["git_token"] is None
+
+        # 绑定不存在的令牌 -> 404;项目不存在 -> 404
+        assert client.put("/api/console/projects/42/token", json={"git_token_id": "nope"}).status_code == 404
+        assert client.put("/api/console/projects/999/token", json={"git_token_id": None}).status_code == 404
+
+
+def test_token_test_endpoint_uses_stored_token(tmp_path, monkeypatch):
+    with _config_client(tmp_path, monkeypatch) as client:
+        from app import config as app_config
+        from app.gitlab_client import GitLabClient
+
+        token = client.post("/api/console/tokens", json={
+            "name": "测试令牌", "token": "glpat-test777",
+        }).json()
+
+        monkeypatch.setattr(app_config, "GITLAB_URL", "https://gitlab.example.com")
+        seen = {}
+
+        def fake_get_current_user(self):
+            seen["token"] = self.token
+            return {"username": "root"}
+
+        monkeypatch.setattr(GitLabClient, "get_current_user", fake_get_current_user)
+        resp = client.post(f"/api/console/tokens/{token['git_token_id']}/test")
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True, "username": "root"}
+        # 服务端用库里的令牌调用,凭据不经页面
+        assert seen["token"] == "glpat-test777"

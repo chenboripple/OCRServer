@@ -24,3 +24,24 @@ def get_gitlab() -> Optional[GitLabClient]:
         except GitLabError as e:
             log.warning(f"GitLab 客户端未就绪: {e}")
     return _gl_client
+
+
+def get_project_gitlab(project_id: str) -> Optional[GitLabClient]:
+    """项目绑定的 Git 令牌优先(代码拉取 + MR 评论都用它),未绑定/解析失败回退全局客户端。
+
+    每次现建客户端(GitLabClient 无状态),令牌改动即时生效,不做缓存;
+    日志只记 project_id,绝不记令牌值。
+    """
+    token = None
+    if project_id:
+        try:
+            from . import storage  # 延迟导入,避免启动期依赖顺序问题
+            token = storage.project_repo.resolve_git_token(project_id)
+        except Exception as e:
+            log.warning(f"查询项目 Git 令牌失败(project_id={project_id},回退全局): {e}")
+    if token and config.GITLAB_URL:
+        try:
+            return GitLabClient(config.GITLAB_URL, token)
+        except GitLabError as e:
+            log.warning(f"项目 GitLab 客户端构造失败(project_id={project_id},回退全局): {e}")
+    return get_gitlab()

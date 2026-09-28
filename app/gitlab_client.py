@@ -167,6 +167,14 @@ class GitLabClient:
                 return str(v).strip() if v else None
         return None
 
+    # ── 当前用户(令牌有效性测试用)──────────────────────────
+    def get_current_user(self) -> dict:
+        """GET /user:校验 token 有效性并返回归属用户信息。"""
+        resp = self._api("GET", "/user")
+        if not resp or not isinstance(resp, dict):
+            raise GitLabError("Failed to get current user: invalid response")
+        return resp
+
     # ── MR diff_refs(inline 评论定位必需)────────────────────
     def get_diff_refs(self, project_id: str, mr_iid: str) -> dict | None:
         """从 MR /versions 取最新版本的 base/start/head sha。"""

@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from . import config
 from . import storage
 from .orchestrator import submit_to_executor
-from .runtime import get_gitlab
+from .runtime import get_project_gitlab
 from .trigger_check import should_trigger_review
 
 log = logging.getLogger("ocr-server")
@@ -70,7 +70,8 @@ async def handle_code_review(request: Request, background_tasks: BackgroundTasks
         return JSONResponse(content={"status": "ignored", "reason": "Invalid review target", "detail": e.errors()}, status_code=400)
 
     # 6. 审核触发策略判断:飞书项目规则优先,未命中项目再走 master/release + 标题前缀兜底
-    gl = get_gitlab()
+    # 项目绑定的 Git 令牌优先;项目首次 MR 时可能尚未登记到项目清单,回退全局属预期
+    gl = get_project_gitlab(project_id)
     trigger_skip_reason = should_trigger_review(
         target_branch,
         object_attributes.get("title", ""),

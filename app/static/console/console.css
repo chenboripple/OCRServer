@@ -720,6 +720,7 @@ details.raw > summary {
 }
 
 .channels-table td,
+.tokens-table td,
 .projects-table td {
   vertical-align: middle;
 }
@@ -857,7 +858,8 @@ details.raw > summary {
 }
 
 .projects-table .col-actions,
-.channels-table .col-actions {
+.channels-table .col-actions,
+.tokens-table .col-actions {
   width: 90px;
 }
 

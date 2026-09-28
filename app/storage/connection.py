@@ -196,20 +196,40 @@ def init_db():
                 updated_at   TEXT NOT NULL
             )
         """)
-        # 项目清单:任务创建时自动登记(upsert,不动 channel_id),也可在配置页手动添加。
-        # channel_id 为空 = 未绑定,通知回退到全局 NOTIFY_* 环境变量配置。
+        # Git 访问令牌:可复用的 GitLab token,绑定到项目后该项目的代码拉取与 MR 评论使用。
+        # token 是敏感值:仓储可读全值,路由层返回给页面时必须脱敏。
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS git_token (
+                git_token_id TEXT PRIMARY KEY,
+                name         TEXT NOT NULL UNIQUE,
+                token        TEXT NOT NULL,
+                created_at   TEXT NOT NULL,
+                updated_at   TEXT NOT NULL
+            )
+        """)
+        # 项目清单:任务创建时自动登记(upsert,不动 channel_id/git_token_id),也可在配置页手动添加。
+        # channel_id 为空 = 未绑定,通知回退到全局 NOTIFY_* 环境变量配置;
+        # git_token_id 为空 = 未绑定,git 拉取与 GitLab API 回退全局 GITLAB_TOKEN。
         conn.execute("""
             CREATE TABLE IF NOT EXISTS review_project (
                 project_id   TEXT PRIMARY KEY,
                 project_url  TEXT NOT NULL DEFAULT '',
                 channel_id   TEXT,
+                git_token_id TEXT,
                 created_at   TEXT NOT NULL,
                 updated_at   TEXT NOT NULL,
-                FOREIGN KEY(channel_id) REFERENCES notify_channel(channel_id) ON DELETE SET NULL
+                FOREIGN KEY(channel_id) REFERENCES notify_channel(channel_id) ON DELETE SET NULL,
+                FOREIGN KEY(git_token_id) REFERENCES git_token(git_token_id) ON DELETE SET NULL
             )
         """)
+        # 旧库迁移:补 git_token_id 列(SQLite 允许 ADD COLUMN 带 REFERENCES,默认 NULL)
+        _ensure_columns(conn, "review_project", {
+            "git_token_id": "git_token_id TEXT REFERENCES git_token(git_token_id) ON DELETE SET NULL",
+        })
         conn.execute("CREATE INDEX IF NOT EXISTS idx_notify_channel_name ON notify_channel(name)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_review_project_channel ON review_project(channel_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_git_token_name ON git_token(name)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_review_project_token ON review_project(git_token_id)")
         # 项目标签:标签字典(提前维护),项目与标签多对多绑定。
         # 删除标签时绑定关系级联清除;标签名唯一。
         conn.execute("""

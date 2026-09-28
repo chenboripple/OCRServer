@@ -7,7 +7,7 @@ from . import config
 from . import reviewer
 from . import storage
 from .gitlab_client import GitLabClient
-from .runtime import get_gitlab
+from .runtime import get_project_gitlab
 from .schemas import ReviewRequest
 
 log = logging.getLogger("ocr-server")
@@ -28,8 +28,9 @@ async def repost_worker():
             unposted = storage.get_unposted_tasks()
             if unposted:
                 log.info(f"Found {len(unposted)} unposted tasks, attempting repost...")
-                gl = get_gitlab()
                 for task in unposted:
+                    # 按项目解析客户端:绑定了 Git 令牌的项目用令牌回写,未绑定回退全局
+                    gl = get_project_gitlab(task.project_id)
                     if not gl:
                         # 客户端不可用是全局故障,不消耗任务的重试次数
                         log.warning("GitLab 客户端不可用,task=%s 暂不标记已回写", task.task_id)

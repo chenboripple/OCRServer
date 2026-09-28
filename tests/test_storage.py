@@ -286,3 +286,122 @@ def test_bind_unknown_channel_raises(temp_storage):
         pass
     # 解绑不存在的项目返回 None
     assert storage.project_repo.bind("999", None) is None
+
+
+# ── Git 令牌 / 项目绑定 ───────────────────────────────────
+
+def _make_token(name="项目组A token", token="glpat-abc123secret"):
+    return storage.token_repo.create(name=name, token=token)
+
+
+def test_git_token_crud_and_keep_secret(temp_storage):
+    tok = _make_token()
+    assert storage.token_repo.get(tok.git_token_id).token == "glpat-abc123secret"
+
+    # 更新:token 留空(None)保持原值
+    updated = storage.token_repo.update(tok.git_token_id, name="改名")
+    assert updated.name == "改名"
+    assert updated.token == "glpat-abc123secret"
+
+    # 显式传新值则覆盖
+    updated = storage.token_repo.update(tok.git_token_id, token="glpat-new999")
+    assert updated.token == "glpat-new999"
+
+    assert storage.token_repo.get_by_name("改名").git_token_id == tok.git_token_id
+    assert storage.token_repo.delete(tok.git_token_id) is True
+    assert storage.token_repo.get(tok.git_token_id) is None
+
+
+def test_git_token_delete_unbinds_projects(temp_storage):
+    tok = _make_token()
+    storage.project_repo.upsert("42", "")
+    storage.project_repo.bind_token("42", tok.git_token_id)
+    assert storage.project_repo.get("42").git_token_id == tok.git_token_id
+
+    storage.token_repo.delete(tok.git_token_id)
+    # 外键 ON DELETE SET NULL:项目自动解绑
+    assert storage.project_repo.get("42").git_token_id is None
+
+
+def test_project_upsert_preserves_token_binding(temp_storage):
+    tok = _make_token()
+    storage.project_repo.upsert("42", "https://gitlab.example.com/g/p.git")
+    storage.project_repo.bind_token("42", tok.git_token_id)
+    # 任务再次到达触发 upsert:URL 刷新但令牌绑定不被冲掉
+    storage.project_repo.upsert("42", "https://gitlab.example.com/g/p2.git")
+    project = storage.project_repo.get("42")
+    assert project.project_url == "https://gitlab.example.com/g/p2.git"
+    assert project.git_token_id == tok.git_token_id
+
+
+def test_resolve_git_token(temp_storage):
+    # 未登记 -> None
+    assert storage.project_repo.resolve_git_token("999") is None
+    # 登记未绑定 -> None
+    storage.project_repo.upsert("42", "")
+    assert storage.project_repo.resolve_git_token("42") is None
+    # 绑定 -> token 字符串
+    tok = _make_token(token="glpat-zzz888")
+    storage.project_repo.bind_token("42", tok.git_token_id)
+    assert storage.project_repo.resolve_git_token("42") == "glpat-zzz888"
+
+
+def test_bind_unknown_token_raises(temp_storage):
+    storage.project_repo.upsert("42", "")
+    try:
+        storage.project_repo.bind_token("42", "no-such-token")
+        raise AssertionError("should raise")
+    except ValueError:
+        pass
+    # 解绑不存在的项目返回 None
+    assert storage.project_repo.bind_token("999", None) is None
+
+
+def test_project_list_joins_token_name(temp_storage):
+    tok = _make_token(name="令牌甲")
+    storage.project_repo.upsert("42", "")
+    storage.project_repo.upsert("43", "")
+    storage.project_repo.bind_token("42", tok.git_token_id)
+
+    result = storage.project_repo.list(page=1, page_size=50)
+    by_id = {p["project_id"]: p for p in result["items"]}
+    assert by_id["42"]["git_token"] == {"git_token_id": tok.git_token_id, "name": "令牌甲"}
+    assert by_id["43"]["git_token"] is None
+
+
+def test_init_db_migrates_legacy_review_project(tmp_path, monkeypatch):
+    """旧库(无 git_token_id 列)经 init_db 迁移后,绑定/级联解绑可用。"""
+    from app import config
+
+    db = tmp_path / "legacy-project.db"
+    monkeypatch.setattr(config, "STORAGE_PATH", db)
+    conn = sqlite3.connect(str(db))
+    try:
+        conn.execute("""
+            CREATE TABLE notify_channel (
+                channel_id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL,
+                webhook_url TEXT NOT NULL, sign_secret TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE review_project (
+                project_id TEXT PRIMARY KEY, project_url TEXT NOT NULL DEFAULT '',
+                channel_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                FOREIGN KEY(channel_id) REFERENCES notify_channel(channel_id) ON DELETE SET NULL
+            )
+        """)
+        conn.execute(
+            "INSERT INTO review_project VALUES ('42', 'u', NULL, '2026-01-01', '2026-01-01')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    storage.init_db()
+    tok = storage.token_repo.create(name="迁移令牌", token="glpat-mig123")
+    storage.project_repo.bind_token("42", tok.git_token_id)
+    assert storage.project_repo.resolve_git_token("42") == "glpat-mig123"
+    # 删除令牌 -> 外键 ON DELETE SET NULL 自动解绑
+    storage.token_repo.delete(tok.git_token_id)
+    assert storage.project_repo.get("42").git_token_id is None
