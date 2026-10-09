@@ -102,6 +102,11 @@ NOTIFY_TYPE = _env("NOTIFY_TYPE", "wechat")            # wechat | feishu
 NOTIFY_WEBHOOK_URL = _env("NOTIFY_WEBHOOK_URL", "")    # 机器人 webhook 完整地址
 NOTIFY_SIGN_SECRET = _env("NOTIFY_SIGN_SECRET", "")    # 可选:加签密钥(飞书/企微均支持)
 NOTIFY_TIMEOUT_SEC = _env_int("NOTIFY_TIMEOUT_SEC", 10)
+# 推送消息中"汇总"行与 MR markdown 详情各自的截断长度;<=0 表示不截断。
+# 注意企业微信 text 消息有 2048 字节 API 上限,中文内容较长时建议调小。
+NOTIFY_SUMMARY_MAX = _env_int("NOTIFY_SUMMARY_MAX", 1500)
+# 通知里"查看MR"链接附带标题的最大长度,超出截断加省略号;<=0 表示不附带标题
+NOTIFY_MR_TITLE_MAX = _env_int("NOTIFY_MR_TITLE_MAX", 20)
 
 # ── Feishu(飞书电子表格集成) ─────────────────────────────────
 # 每次 review 前从飞书电子表格读取自定义审核规则,更新到 ocr 配置文件中

@@ -230,6 +230,23 @@ class ProjectTagsSet(BaseModel):
     tag_ids: list[str] = Field(default_factory=list, description="标签 id 列表")
 
 
+# ── 配置页:Git 用户(git_user) ──────────────────────────
+
+_EMPLOYEE_NUMBER_MAX_LEN = 64
+
+
+class GitUserUpdate(BaseModel):
+    """维护 Git 用户工号。空串 = 清空(推送回退映射表/用户名文本艾特)。"""
+    employee_number: str = Field("", description="工号(飞书推送直接 <at id=工号> 艾特)")
+
+    @validator("employee_number")
+    def validate_employee_number(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) > _EMPLOYEE_NUMBER_MAX_LEN:
+            raise ValueError(f"工号不能超过 {_EMPLOYEE_NUMBER_MAX_LEN} 字")
+        return value
+
+
 class ReviewResponse(BaseModel):
     approve: bool
     summary: str

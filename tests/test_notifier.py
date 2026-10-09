@@ -18,7 +18,8 @@ def feishu_notify(monkeypatch):
     monkeypatch.setattr(user_map, "user_map_configured", lambda: True)
 
 
-def _card(approve, error=None, open_id="", mr_author="", mr_url=""):
+def _card(approve, error=None, open_id="", mr_author="", mr_url="", mr_title="",
+          markdown_summary="", mr_employee_number=""):
     return notifier._build_card(
         project_name="group/repo",
         source_branch="feature-x",
@@ -29,6 +30,9 @@ def _card(approve, error=None, open_id="", mr_author="", mr_url=""):
         open_id=open_id,
         mr_author=mr_author,
         mr_url=mr_url,
+        mr_title=mr_title,
+        markdown_summary=markdown_summary,
+        mr_employee_number=mr_employee_number,
     )
 
 
@@ -73,12 +77,64 @@ def test_card_mapped_author_takes_priority(feishu_notify):
     assert "@zhangsan" not in at_md
 
 
+def test_card_employee_number_takes_priority(feishu_notify):
+    """工号 > open_id:配置页维护了工号时用 <at id=工号> 艾特。"""
+    card = _card(False, mr_employee_number="E00123",
+                 open_id="ou_zhangsan", mr_author="zhangsan")
+    at_md = card["elements"][-1]["text"]["content"]
+    assert "<at id=E00123></at>" in at_md
+    assert "ou_zhangsan" not in at_md and "@zhangsan" not in at_md
+
+
+def test_card_employee_number_alone_still_ats(feishu_notify):
+    """只有工号(无 open_id/用户名)也真艾特。"""
+    card = _card(True, mr_employee_number="E007")
+    assert "<at id=E007></at>" in card["elements"][-1]["text"]["content"]
+    assert card["elements"][-2]["tag"] == "hr"
+
+
+def test_card_empty_employee_number_falls_back_to_open_id(feishu_notify):
+    """空工号回归既有行为:open_id 真艾特。"""
+    card = _card(False, mr_employee_number="", open_id="ou_lisi")
+    at_md = card["elements"][-1]["text"]["content"]
+    assert "<at id=ou_lisi></at>" in at_md
+
+
 def test_card_ends_with_merge_request_link(feishu_notify):
+    """无标题时链接文案保持"查看 MR"。"""
     mr_url = "https://github.com/group/repo/pull/42"
     card = _card(False, open_id="ou_zhangsan", mr_url=mr_url)
     assert card["elements"][-1]["text"]["content"] == f"[查看 MR]({mr_url})"
     assert card["elements"][-2]["tag"] == "hr"
     assert "<at id=ou_zhangsan></at>" in card["elements"][-3]["text"]["content"]
+
+
+def test_card_link_includes_short_mr_title(feishu_notify):
+    mr_url = "https://gitlab.example.com/group/repo/-/merge_requests/7"
+    card = _card(False, mr_url=mr_url, mr_title="修复登录超时")
+    assert card["elements"][-1]["text"]["content"] == f"[查看MR：修复登录超时]({mr_url})"
+
+
+def test_card_link_truncates_long_mr_title(feishu_notify):
+    """标题超过 NOTIFY_MR_TITLE_MAX(默认 20)时截断并加省略号。"""
+    mr_url = "https://gitlab.example.com/group/repo/-/merge_requests/7"
+    card = _card(False, mr_url=mr_url, mr_title="修" * 25)
+    assert card["elements"][-1]["text"]["content"] == f"[查看MR：{'修' * 20}...]({mr_url})"
+
+
+def test_card_link_title_disabled_by_config(feishu_notify, monkeypatch):
+    """NOTIFY_MR_TITLE_MAX<=0 时不附带标题。"""
+    monkeypatch.setattr(config, "NOTIFY_MR_TITLE_MAX", 0)
+    mr_url = "https://gitlab.example.com/group/repo/-/merge_requests/7"
+    card = _card(False, mr_url=mr_url, mr_title="修复登录超时")
+    assert card["elements"][-1]["text"]["content"] == f"[查看 MR]({mr_url})"
+
+
+def test_card_link_escapes_brackets_in_title(feishu_notify):
+    """标题含方括号时替换为圆括号,避免破坏 markdown 链接。"""
+    mr_url = "https://gitlab.example.com/group/repo/-/merge_requests/7"
+    card = _card(True, mr_url=mr_url, mr_title="feat: [核心模块] 重构")
+    assert card["elements"][-1]["text"]["content"] == f"[查看MR：feat: (核心模块) 重构]({mr_url})"
 
 
 @pytest.mark.parametrize(
@@ -100,19 +156,31 @@ def test_card_body_fields(feishu_notify):
     assert "汇总内容" in md
 
 
+def test_card_includes_markdown_summary(feishu_notify):
+    """markdown 详情作为第二个 div 追加在正文后、艾特与链接前。"""
+    detail = "## ✅ OpenCodeReview 自动审核\n\n**问题统计(共 2 条)**:`critical`: 2"
+    card = _card(False, open_id="ou_zhangsan", mr_url="https://x/mr/1",
+                 markdown_summary=detail)
+    assert card["elements"][1]["text"]["content"] == detail
+    assert "<at id=ou_zhangsan></at>" in card["elements"][-3]["text"]["content"]
+    assert "查看 MR" in card["elements"][-1]["text"]["content"]
+
+
+def test_card_truncates_markdown_summary(feishu_notify, monkeypatch):
+    monkeypatch.setattr(config, "NOTIFY_SUMMARY_MAX", 10)
+    card = _card(True, markdown_summary="字" * 30)
+    assert card["elements"][1]["text"]["content"] == "字" * 10 + "..."
+
+
+def test_summary_line_unlimited_when_zero(monkeypatch):
+    monkeypatch.setattr(config, "NOTIFY_SUMMARY_MAX", 0)
+    assert notifier._summary_line("字" * 2000, None) == "字" * 2000
+
+
 def test_resolve_open_id(feishu_notify):
     assert notifier.resolve_open_id("zhangsan") == "ou_zhangsan"
     assert notifier.resolve_open_id("nobody") == ""
     assert notifier.resolve_open_id("") == ""
-
-
-def test_needs_mr_author(feishu_notify, monkeypatch):
-    """飞书通知即需要 MR 作者(未命中映射也要展示 GitLab 用户名)。"""
-    assert notifier.needs_mr_author() is True
-    monkeypatch.setattr(config, "NOTIFY_TYPE", "wechat")
-    assert notifier.needs_mr_author() is False
-    monkeypatch.setattr(config, "NOTIFY_ENABLED", False)
-    assert notifier.needs_mr_author() is False
 
 
 def test_feishu_request_is_interactive(feishu_notify):
@@ -160,14 +228,47 @@ def test_feishu_channel_sign_in_body():
     assert "timestamp" in body and "sign" in body
 
 
-def test_needs_mr_author_with_channel(feishu_notify, monkeypatch):
-    """channel 传入时按 channel 类型判断,不看全局配置。"""
-    monkeypatch.setattr(config, "NOTIFY_ENABLED", False)
-    feishu_channel = {"type": "feishu", "webhook_url": "https://x", "sign_secret": ""}
-    wechat_channel = {"type": "wechat", "webhook_url": "https://x", "sign_secret": ""}
-    assert notifier.needs_mr_author(feishu_channel) is True
-    assert notifier.needs_mr_author(wechat_channel) is False
-    assert notifier.needs_mr_author(None) is False  # 全局关了
+def test_dingtalk_markdown_mr_link_with_title():
+    md = notifier._build_dingtalk_markdown(
+        project_name="group/repo", source_branch="feature-x", target_branch="main",
+        approve=False, summary="存在问题", error=None,
+        mr_url="https://gitlab.example.com/group/repo/-/merge_requests/7",
+        mr_title="修复登录超时",
+    )
+    assert "- [查看MR：修复登录超时](https://gitlab.example.com/group/repo/-/merge_requests/7)" in md["markdown"]["text"]
+
+
+def test_dingtalk_markdown_includes_summary_detail():
+    md = notifier._build_dingtalk_markdown(
+        project_name="group/repo", source_branch="feature-x", target_branch="main",
+        approve=False, summary="存在问题", error=None,
+        mr_url="https://gitlab.example.com/group/repo/-/merge_requests/7",
+        mr_title="修复登录超时",
+        markdown_summary="**问题统计(共 2 条)**:`critical`: 2",
+    )
+    text = md["markdown"]["text"]
+    assert "**问题统计(共 2 条)**:`critical`: 2" in text
+    assert "- [查看MR：修复登录超时](https://gitlab.example.com/group/repo/-/merge_requests/7)" in text
+
+
+def test_wechat_content_includes_markdown_summary():
+    content = notifier._build_content(
+        project_name="group/repo", source_branch="feature-x", target_branch="main",
+        approve=True, summary="ok", error=None,
+        markdown_summary="**问题统计(共 2 条)**:`critical`: 2",
+    )
+    assert "**问题统计(共 2 条)**:`critical`: 2" in content
+
+
+def test_wechat_content_appends_mr_link_plain():
+    """企微 text 不支持超链接语法,标题 + 裸 URL 展示。"""
+    content = notifier._build_content(
+        project_name="group/repo", source_branch="feature-x", target_branch="main",
+        approve=True, summary="ok", error=None,
+        mr_title="修复登录超时",
+        mr_url="https://gitlab.example.com/group/repo/-/merge_requests/7",
+    )
+    assert "查看MR：修复登录超时 https://gitlab.example.com/group/repo/-/merge_requests/7" in content
 
 
 def test_dispatch_uses_channel_over_env(monkeypatch):
@@ -274,11 +375,12 @@ def test_dispatch_sends_card(feishu_notify, monkeypatch):
         summary="存在问题",
         mr_author="lisi",
         mr_iid="7",
+        mr_title="修复登录超时",
     )
     assert sent["body"]["msg_type"] == "interactive"
     elements = sent["body"]["card"]["elements"]
     assert "<at id=ou_lisi></at>" in elements[-3]["text"]["content"]
-    assert elements[-1]["text"]["content"] == "[查看 MR](https://gitlab.example.com/group/repo/-/merge_requests/7)"
+    assert elements[-1]["text"]["content"] == "[查看MR：修复登录超时](https://gitlab.example.com/group/repo/-/merge_requests/7)"
 
 
 def test_dispatch_unmapped_author(feishu_notify, monkeypatch):
@@ -308,3 +410,38 @@ def test_dispatch_unmapped_author(feishu_notify, monkeypatch):
     at_md = elements[-3]["text"]["content"]
     assert "@nobody" in at_md and "<at id=" not in at_md
     assert elements[-1]["text"]["content"] == "[查看 MR](https://gitlab.example.com/group/repo/-/merge_requests/8)"
+
+
+def test_dispatch_employee_number_skips_open_id_lookup(feishu_notify, monkeypatch):
+    """工号非空时不再查飞书映射表(省一次表格查询),直接 <at id=工号>。"""
+    from app import user_map
+
+    def fail_lookup(name):
+        raise AssertionError(f"get_open_id 不应被调用: {name}")
+
+    monkeypatch.setattr(user_map, "get_open_id", fail_lookup)
+    sent = {}
+
+    class FakeResp:
+        status_code = 200
+
+        def json(self):
+            return {"code": 0}
+
+    monkeypatch.setattr(
+        notifier.httpx.Client,
+        "post",
+        lambda self, url, json=None: (sent.update(body=json), FakeResp())[1],
+    )
+    notifier.dispatch(
+        project_url="https://gitlab.example.com/group/repo.git",
+        source_branch="feature-x",
+        target_branch="main",
+        approve=False,
+        summary="存在问题",
+        mr_author="lisi",
+        mr_employee_number="E00123",
+        mr_iid="7",
+    )
+    elements = sent["body"]["card"]["elements"]
+    assert "<at id=E00123></at>" in elements[-3]["text"]["content"]

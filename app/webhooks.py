@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from . import config
 from . import storage
-from .orchestrator import submit_to_executor
+from .orchestrator import register_git_user, submit_to_executor
 from .runtime import get_project_gitlab
 from .trigger_check import should_trigger_review
 
@@ -69,7 +69,14 @@ async def handle_code_review(request: Request, background_tasks: BackgroundTasks
     except ValidationError as e:
         return JSONResponse(content={"status": "ignored", "reason": "Invalid review target", "detail": e.errors()}, status_code=400)
 
-    # 6. 审核触发策略判断:飞书项目规则优先,未命中项目再走 master/release + 标题前缀兜底
+    # 6. 登记 GitLab 用户:webhook 的 user 与 assignees 自带 id/name/username/email,
+    #    全量 upsert 进 git_user 表(工号在配置页维护)。放在审核触发判断之前,
+    #    即使本次跳过审核用户也已入表;失败只记日志,绝不影响 webhook 主流程。
+    register_git_user(payload.get("user") or {})
+    for assignee in payload.get("assignees") or []:
+        register_git_user(assignee or {})
+
+    # 7. 审核触发策略判断:飞书项目规则优先,未命中项目再走 master/release + 标题前缀兜底
     # 项目绑定的 Git 令牌优先;项目首次 MR 时可能尚未登记到项目清单,回退全局属预期
     gl = get_project_gitlab(project_id)
     trigger_skip_reason = should_trigger_review(
@@ -86,12 +93,12 @@ async def handle_code_review(request: Request, background_tasks: BackgroundTasks
                 log.warning("跳过审核评论发送失败: %s", e)
         return JSONResponse(content={"status": "skipped", "reason": trigger_skip_reason})
 
-    # 7. Bounded queue: reject excess work before creating external side effects.
+    # 8. Bounded queue: reject excess work before creating external side effects.
     queued_count = storage.get_queued_count()
     if queued_count >= config.MAX_QUEUED_REVIEWS:
         return JSONResponse(content={"status": "rejected", "reason": "Review queue is full"}, status_code=429)
 
-    # 8. 落库任务(create_task 内部按 (project_id, mr_iid, commit_sha) 幂等去重)
+    # 9. 落库任务(create_task 内部按 (project_id, mr_iid, commit_sha) 幂等去重)
     task_id, created = storage.create_task(
         project_id=project_id,
         mr_iid=mr_iid,
@@ -118,14 +125,14 @@ async def handle_code_review(request: Request, background_tasks: BackgroundTasks
         task_id=task_id,
     )
 
-    # 9. 去重:命中已有任务则直接返回,不再建 discussion / 投递
+    # 10. 去重:命中已有任务则直接返回,不再建 discussion / 投递
     #    (避免重复提交时冗余调用 GitLab 建 discussion 且无人 resolve 造成泄漏)
     if not created:
         log.info("重复提交,跳过: task_id=%s (MR !%s %s -> %s)",
                  task_id, mr_iid, source_branch, target_branch)
         return JSONResponse(content={"status": "duplicate", "task_id": task_id})
 
-    # 10. 投递异步任务. Pending discussion is deliberately created by the
+    # 11. 投递异步任务. Pending discussion is deliberately created by the
     # worker so webhook acknowledgement is independent of GitLab availability.
     background_tasks.add_task(submit_to_executor, task_id)
 

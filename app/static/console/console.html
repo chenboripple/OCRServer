@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OCR Server Console</title>
-  <link rel="stylesheet" href="console/assets/console.css?v=20260928-1" />
+  <link rel="stylesheet" href="console/assets/console.css?v=20261008-1" />
   <script defer src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-  <script defer src="console/assets/console.js?v=20260928-1"></script>
+  <script defer src="console/assets/console.js?v=20261008-1"></script>
 </head>
 <body>
   <div id="app">
@@ -32,6 +32,7 @@
       <button class="tab" :class="{ active: activeTab === 'channels' }" @click="switchTab('channels')">推送配置</button>
       <button class="tab" :class="{ active: activeTab === 'tokens' }" @click="switchTab('tokens')">Git 令牌</button>
       <button class="tab" :class="{ active: activeTab === 'tags' }" @click="switchTab('tags')">项目标签</button>
+      <button class="tab" :class="{ active: activeTab === 'users' }" @click="switchTab('users')">Git 用户</button>
     </nav>
 
     <main class="layout">
@@ -559,7 +560,7 @@
       </section>
       </template>
 
-      <template v-else>
+      <template v-else-if="activeTab === 'tags'">
       <section class="card">
         <div class="section-title">
           <span>项目标签</span>
@@ -583,6 +584,53 @@
           <div class="muted" v-if="tags.length === 0">暂无标签,点右上角「添加标签」创建。</div>
         </div>
         <div v-if="tagError" class="err config-hint">{{ tagError }}</div>
+      </section>
+      </template>
+
+      <template v-else-if="activeTab === 'users'">
+      <section class="card">
+        <div class="section-title">
+          <span>Git 用户</span>
+          <div class="section-actions">
+            <span class="muted">{{ users.length }} 人</span>
+            <button class="ghost" @click="loadUsers">刷新</button>
+          </div>
+        </div>
+        <p class="muted config-hint">
+          用户在 MR webhook 到达时自动登记(提交人/处理人,尽力带出邮箱)。
+          「工号」在此维护:保存后飞书推送直接以工号艾特;留空则回退飞书用户映射表(open_id)艾特,
+          再回退 @GitLab用户名 文本。
+        </p>
+
+        <div class="table-wrap">
+          <table class="tasks-table users-table">
+            <thead>
+              <tr>
+                <th>姓名</th><th>用户名</th><th>邮箱</th><th>工号</th><th>GitLab ID</th><th>更新时间</th><th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="u in users" :key="u.user_id">
+                <td>{{ u.name || u.username }}</td>
+                <td>{{ u.username }}</td>
+                <td>{{ u.email || '-' }}</td>
+                <td>
+                  <span v-if="u.employee_number">{{ u.employee_number }}</span>
+                  <span v-else class="muted">未维护</span>
+                </td>
+                <td class="muted">{{ u.user_id }}</td>
+                <td>{{ compactTime(u.updated_at) }}</td>
+                <td class="config-actions">
+                  <button class="ghost btn-sm" @click="openUserEdit(u)">编辑</button>
+                </td>
+              </tr>
+              <tr v-if="users.length === 0">
+                <td colspan="7" class="muted">暂无用户,MR webhook 到达后自动登记。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-if="userError" class="err config-hint">{{ userError }}</div>
       </section>
       </template>
     </main>
@@ -671,6 +719,27 @@
         <div class="modal-foot">
           <button class="ghost" type="button" @click="cancelTagModal">取消</button>
           <button type="submit" :disabled="tagSaving" @click="submitTagModal">{{ tagModal.editingId ? '保存' : '添加' }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 模态框:Git 用户 维护工号 ─────────────────────── -->
+    <div class="modal-mask" v-if="userModal.open" @click.self="cancelUserModal">
+      <div class="modal modal-sm">
+        <div class="modal-head">
+          <span>维护工号 - {{ userModal.username }}</span>
+          <button class="ghost btn-sm" type="button" @click="cancelUserModal">✕</button>
+        </div>
+        <form class="modal-body" @submit.prevent="submitUserModal">
+          <div class="field">
+            <label>工号(留空 = 清空)</label>
+            <input v-model.trim="userModal.employeeNumber" maxlength="64" placeholder="如 E00123" />
+          </div>
+          <div v-if="userError" class="err">{{ userError }}</div>
+        </form>
+        <div class="modal-foot">
+          <button class="ghost" type="button" @click="cancelUserModal">取消</button>
+          <button type="submit" :disabled="userSaving" @click="submitUserModal">保存</button>
         </div>
       </div>
     </div>

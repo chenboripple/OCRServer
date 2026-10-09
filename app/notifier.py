@@ -26,7 +26,6 @@ log = logging.getLogger("ocr-server.notify")
 
 _RETRIES = 2
 _RETRY_BASE_DELAY = 1.0  # 秒
-_MAX_SUMMARY_LEN = 500   # 汇总行最大长度(机器人消息长度受限)
 
 # 支持的推送类型:企微 / 飞书 / 钉钉
 VALID_TYPES = ("wechat", "feishu", "dingtalk")
@@ -98,34 +97,59 @@ def _result_parts(approve: bool, error: str | None) -> tuple[str, str]:
 
 
 def _summary_line(summary: str, error: str | None) -> str:
+    """汇总/详情截断:超过 NOTIFY_SUMMARY_MAX 截断加省略号;<=0 表示不截断。"""
     line = error or summary
-    if len(line) > _MAX_SUMMARY_LEN:
-        line = line[:_MAX_SUMMARY_LEN] + "..."
+    limit = config.NOTIFY_SUMMARY_MAX
+    if limit > 0 and len(line) > limit:
+        line = line[:limit] + "..."
     return line
 
 
+def _mr_link_label(mr_title: str) -> str:
+    """MR 链接文案:有标题时为"查看MR：标题前 N 字符"(超长加省略号),无标题回退"查看 MR"。
+
+    N 由 NOTIFY_MR_TITLE_MAX 配置(<=0 视为不附带标题)。
+    标题中的方括号替换为圆括号,避免破坏 markdown 链接语法。
+    """
+    title = (mr_title or "").replace("[", "(").replace("]", ")").strip()
+    if not title or config.NOTIFY_MR_TITLE_MAX <= 0:
+        return "查看 MR"
+    if len(title) > config.NOTIFY_MR_TITLE_MAX:
+        title = title[: config.NOTIFY_MR_TITLE_MAX] + "..."
+    return f"查看MR：{title}"
+
+
 def _build_content(*, project_name, source_branch, target_branch,
-                   approve, summary, error) -> str:
+                   approve, summary, error, mr_title="", mr_url="",
+                   markdown_summary="") -> str:
     """企业微信 text 消息内容。"""
     result, _ = _result_parts(approve, error)
-    return (
-        f"项目: {project_name}\n"
-        f"分支: {source_branch} -> {target_branch}\n"
-        f"审核结果: {result}\n"
-        f"汇总: {_summary_line(summary, error)}"
-    )
+    lines = [
+        f"项目: {project_name}",
+        f"分支: {source_branch} -> {target_branch}",
+        f"审核结果: {result}",
+        f"汇总: {_summary_line(summary, error)}",
+    ]
+    if markdown_summary:
+        # MR 汇总详情(markdown 原文,text 消息不支持渲染,语法符号按原文展示)
+        lines.append(_summary_line(markdown_summary, None))
+    if mr_url:
+        # text 消息不支持超链接语法,URL 以裸文本展示(客户端自动识别为链接)
+        lines.append(f"{_mr_link_label(mr_title)} {mr_url}")
+    return "\n".join(lines)
 
 
 def _build_card(*, project_name, source_branch, target_branch,
                 approve, summary, error, open_id: str,
-                mr_author: str = "", mr_url: str = "") -> dict:
+                mr_author: str = "", mr_url: str = "", mr_title: str = "",
+                markdown_summary: str = "", mr_employee_number: str = "") -> dict:
     """
     飞书 interactive 卡片:标题为审核结果,末尾附带 MR 链接。
 
-    - 命中映射表: 真正艾特 (<at id=open_id>)
-    - 未命中: 以 @GitLab用户名 文本展示(机器人无 open_id 无法真艾特),
-      方便发现漏配的人并及时补充映射表
-    - 连 GitLab 用户名都没取到: 不追加艾特行
+    艾特优先级:工号(控制台维护,自建机器人支持按 user_id/工号艾) >
+    open_id(命中飞书映射表, 真正艾特 <at id=open_id>) >
+    GitLab 用户名(@GitLab用户名 文本展示,提示补录映射表)。
+    连用户名都没取到时: 不追加艾特行。
     """
     result, template = _result_parts(approve, error)
     body_md = (
@@ -134,7 +158,20 @@ def _build_card(*, project_name, source_branch, target_branch,
         f"**汇总**: {_summary_line(summary, error)}"
     )
     elements = [{"tag": "div", "text": {"tag": "lark_md", "content": body_md}}]
-    if open_id:
+    if markdown_summary:
+        # MR 汇总详情:表格等 lark_md 不支持的语法按原文展示,信息仍在
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": _summary_line(markdown_summary, None)},
+        })
+    if mr_employee_number:
+        # 工号(控制台维护):自建机器人支持按 user_id/工号艾,直接真艾特
+        elements.append({"tag": "hr"})
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": f"<at id={mr_employee_number}></at> 请关注审核结果"},
+        })
+    elif open_id:
         elements.append({"tag": "hr"})
         elements.append({
             "tag": "div",
@@ -156,7 +193,7 @@ def _build_card(*, project_name, source_branch, target_branch,
         elements.append({"tag": "hr"})
         elements.append({
             "tag": "div",
-            "text": {"tag": "lark_md", "content": f"[查看 MR]({mr_url})"},
+            "text": {"tag": "lark_md", "content": f"[{_mr_link_label(mr_title)}]({mr_url})"},
         })
     return {
         "header": {
@@ -168,7 +205,8 @@ def _build_card(*, project_name, source_branch, target_branch,
 
 
 def _build_dingtalk_markdown(*, project_name, source_branch, target_branch,
-                             approve, summary, error, mr_url: str = "") -> dict:
+                             approve, summary, error, mr_url: str = "",
+                             mr_title: str = "", markdown_summary: str = "") -> dict:
     """钉钉 markdown 消息体。标题固定含"代码审核"关键词(钉钉机器人常配关键词过滤);
     艾特需要 atMobiles/atUserIds,现有用户映射表只有飞书 open_id,故钉钉不艾特。"""
     result, _ = _result_parts(approve, error)
@@ -178,8 +216,10 @@ def _build_dingtalk_markdown(*, project_name, source_branch, target_branch,
         f"- 审核结果: {result}",
         f"- 汇总: {_summary_line(summary, error)}",
     ]
+    if markdown_summary:
+        lines.append(f"\n{_summary_line(markdown_summary, None)}")
     if mr_url:
-        lines.append(f"- [查看 MR]({mr_url})")
+        lines.append(f"- [{_mr_link_label(mr_title)}]({mr_url})")
     return {
         "msgtype": "markdown",
         "markdown": {"title": f"代码审核 {result}", "text": "\n\n".join(lines)},
@@ -189,17 +229,6 @@ def _build_dingtalk_markdown(*, project_name, source_branch, target_branch,
 def resolve_open_id(mr_author: str) -> str:
     """把 GitLab 用户名映射成飞书 open_id(读飞书表格,TTL 缓存),查不到返回空串。"""
     return user_map.get_open_id(mr_author)
-
-
-def needs_mr_author(channel: dict | None = None) -> bool:
-    """是否需要查 MR 作者(飞书卡片通知:命中映射真艾特,未命中也要展示 @GitLab用户名 提示补录)。
-
-    传了 channel(项目绑定推送配置)按 channel 类型判断,否则按全局 NOTIFY_* 配置判断。
-    """
-    if channel is not None:
-        return (channel.get("type") or "").strip().lower() == "feishu"
-    ntype = (config.NOTIFY_TYPE or "").strip().lower()
-    return config.NOTIFY_ENABLED and ntype == "feishu"
 
 
 def _build_request(content: str, card: dict | None = None, markdown: dict | None = None,
@@ -254,7 +283,8 @@ def _check_response(ntype: str, resp: httpx.Response) -> str | None:
 
 def dispatch(*, project_url: str, source_branch: str, target_branch: str,
              approve: bool, summary: str = "", error: str | None = None,
-             mr_author: str = "", mr_iid: str = "",
+             mr_author: str = "", mr_iid: str = "", mr_title: str = "",
+             markdown_summary: str = "", mr_employee_number: str = "",
              channel: dict | None = None) -> None:
     """发送审核结果通知。未配置或发送失败均不抛异常。
 
@@ -282,6 +312,7 @@ def dispatch(*, project_url: str, source_branch: str, target_branch: str,
             return
 
     project_name = _project_name(project_url)
+    mr_url = _merge_request_url(project_url, mr_iid)
     content = _build_content(
         project_name=project_name,
         source_branch=source_branch,
@@ -289,6 +320,9 @@ def dispatch(*, project_url: str, source_branch: str, target_branch: str,
         approve=approve,
         summary=summary,
         error=error,
+        mr_title=mr_title,
+        mr_url=mr_url,
+        markdown_summary=markdown_summary,
     )
 
     card = None
@@ -301,9 +335,12 @@ def dispatch(*, project_url: str, source_branch: str, target_branch: str,
             approve=approve,
             summary=summary,
             error=error,
-            open_id=resolve_open_id(mr_author),
+            open_id="" if mr_employee_number else resolve_open_id(mr_author),
             mr_author=mr_author,
-            mr_url=_merge_request_url(project_url, mr_iid),
+            mr_url=mr_url,
+            mr_title=mr_title,
+            markdown_summary=markdown_summary,
+            mr_employee_number=mr_employee_number,
         )
     elif ntype == "dingtalk":
         markdown = _build_dingtalk_markdown(
@@ -313,7 +350,9 @@ def dispatch(*, project_url: str, source_branch: str, target_branch: str,
             approve=approve,
             summary=summary,
             error=error,
-            mr_url=_merge_request_url(project_url, mr_iid),
+            mr_url=mr_url,
+            mr_title=mr_title,
+            markdown_summary=markdown_summary,
         )
 
     try:

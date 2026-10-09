@@ -405,3 +405,61 @@ def test_init_db_migrates_legacy_review_project(tmp_path, monkeypatch):
     # 删除令牌 -> 外键 ON DELETE SET NULL 自动解绑
     storage.token_repo.delete(tok.git_token_id)
     assert storage.project_repo.get("42").git_token_id is None
+
+
+# ── Git 用户(git_user) ───────────────────────────────────
+
+def _make_git_user(user_id="2486", username="chenbo.chen1", name="", email=""):
+    return storage.user_repo.upsert_from_gitlab(
+        user_id=user_id, username=username, name=name, email=email,
+    )
+
+
+def test_git_user_upsert_idempotent_and_preserves_employee_number(temp_storage):
+    user = _make_git_user(name="陈博", email="chenbo@jtexpress.com")
+    assert user.name == "陈博"
+    assert user.email == "chenbo@jtexpress.com"
+    assert user.employee_number == ""
+
+    # 配置页维护工号后,再走自动登记(如 REST MR 作者,email 为空)不得冲掉工号
+    storage.user_repo.update_employee_number("2486", employee_number="E00123")
+    again = _make_git_user(name="陈博", email="")  # REST 来源无 email
+    assert again.employee_number == "E00123"
+    assert again.email == "chenbo@jtexpress.com"  # 空值不清空已有邮箱
+
+    # 缺 id/username 的对象直接跳过
+    assert storage.user_repo.upsert_from_gitlab(user_id="", username="x") is None
+    assert storage.user_repo.upsert_from_gitlab(user_id="1", username="") is None
+    assert storage.user_repo.list() == [again]
+
+
+def test_git_user_email_non_empty_overwrites(temp_storage):
+    _make_git_user(email="old@example.com")
+    # webhook 带新 email(如用户在 GitLab 改了邮箱)-> 覆盖
+    updated = _make_git_user(email="new@example.com")
+    assert updated.email == "new@example.com"
+
+
+def test_git_user_update_employee_number(temp_storage):
+    _make_git_user()
+    # 未命中 -> None(路由层据此 404)
+    assert storage.user_repo.update_employee_number("999", employee_number="X") is None
+
+    user = storage.user_repo.update_employee_number("2486", employee_number="E007")
+    assert user.employee_number == "E007"
+    # 空串 = 清空
+    user = storage.user_repo.update_employee_number("2486", employee_number="")
+    assert user.employee_number == ""
+
+
+def test_git_user_list_sort_and_get_by_username(temp_storage):
+    _make_git_user(user_id="1", username="bob")
+    _make_git_user(user_id="2", username="Alice")
+    _make_git_user(user_id="3", username="carl")
+    # list 按 username 不区分大小写排序
+    assert [u.username for u in storage.user_repo.list()] == ["Alice", "bob", "carl"]
+
+    assert storage.user_repo.get_by_username("alice").user_id == "2"
+    assert storage.user_repo.get_by_username("nobody") is None
+    assert storage.user_repo.get("3").username == "carl"
+    assert storage.user_repo.get("999") is None

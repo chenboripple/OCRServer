@@ -84,3 +84,84 @@ def test_cancel_closed_mr_without_pending_posts_note(temp_storage):
     assert fake.note_msg and "已关闭/合并" in fake.note_msg
     assert storage.get_task(tid).status == "cancelled"
     assert storage.get_task(tid).gitlab_posted == 1
+
+
+# ── Git 用户登记 / MR 详情三元组 ──────────────────────────
+
+def test_register_git_user_upsert_and_returns_employee_number(temp_storage):
+    # webhook 来源:自带 email;未维护工号 -> 返回空串(调用方回退 open_id 艾特)
+    assert orchestrator.register_git_user(
+        {"id": 2486, "name": "陈博", "username": "chenbo.chen1", "email": "chenbo@jt.com"}
+    ) == ""
+    assert storage.user_repo.get("2486").email == "chenbo@jt.com"
+
+    storage.user_repo.update_employee_number("2486", employee_number="E00123")
+    # REST MR 作者来源(无 email):幂等刷新,仍返回已维护的工号且不清邮箱
+    assert orchestrator.register_git_user({"id": 2486, "username": "chenbo.chen1"}) == "E00123"
+    user = storage.user_repo.get("2486")
+    assert user.email == "chenbo@jt.com"
+    assert user.employee_number == "E00123"
+
+
+def test_register_git_user_missing_fields_skipped(temp_storage):
+    assert orchestrator.register_git_user({}) == ""
+    assert orchestrator.register_git_user({"id": 2486}) == ""  # 缺 username
+    assert orchestrator.register_git_user({"username": "bob"}) == ""  # 缺 id
+    assert storage.user_repo.list() == []
+
+
+def test_register_git_user_swallows_exceptions(monkeypatch, temp_storage):
+    def boom(**kwargs):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(storage.user_repo, "upsert_from_gitlab", boom)
+    # 登记失败只记日志,返回空串,不抛异常影响主流程
+    assert orchestrator.register_git_user({"id": 1, "username": "a"}) == ""
+
+
+class _AuthorGL:
+    """带作者信息的假 GitLab 客户端(get_merge_request 返回 author + title)。"""
+
+    def __init__(self, author):
+        self.author = author
+        self.called = 0
+
+    def get_merge_request(self, project_id, mr_iid):
+        self.called += 1
+        return {"iid": mr_iid, "state": "opened", "title": "修复登录超时",
+                "author": self.author}
+
+
+def test_mr_details_returns_triple(temp_storage, monkeypatch):
+    from app import config
+
+    monkeypatch.setattr(config, "NOTIFY_ENABLED", True)
+    monkeypatch.setattr(config, "NOTIFY_WEBHOOK_URL", "https://example.com/hook")
+    storage.user_repo.upsert_from_gitlab(user_id="2486", username="chenbo.chen1")
+    storage.user_repo.update_employee_number("2486", employee_number="E00123")
+
+    gl = _AuthorGL({"id": 2486, "username": "chenbo.chen1"})
+    assert orchestrator._mr_details(gl, "42", "7") == ("chenbo.chen1", "修复登录超时", "E00123")
+    # 顺带把作者登记进了 git_user 表
+    assert storage.user_repo.get("2486").name == ""
+
+
+def test_mr_details_notify_disabled_returns_empty(temp_storage, monkeypatch):
+    from app import config
+
+    monkeypatch.setattr(config, "NOTIFY_ENABLED", False)
+    gl = _AuthorGL({"id": 2486, "username": "chenbo.chen1"})
+    # 不值得查询:直接返回空三元组,不调 GitLab
+    assert orchestrator._mr_details(gl, "42", "7") == ("", "", "")
+    assert gl.called == 0
+
+
+def test_mr_details_with_channel_queries_even_if_env_off(temp_storage, monkeypatch):
+    from app import config
+
+    monkeypatch.setattr(config, "NOTIFY_ENABLED", False)
+    monkeypatch.setattr(config, "NOTIFY_WEBHOOK_URL", "")
+    gl = _AuthorGL({"id": 2486, "username": "chenbo.chen1"})
+    # 项目绑定推送配置 -> 通知必然发送,仍查询详情
+    assert orchestrator._mr_details(gl, "42", "7", channel={"type": "feishu"}) == \
+        ("chenbo.chen1", "修复登录超时", "")

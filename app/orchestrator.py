@@ -20,19 +20,59 @@ def submit_to_executor(task_id: str):
     executor.submit(do_review_async, task_id)
 
 
-def _mr_author(gl, project_id: str, mr_iid: str, channel: dict | None = None) -> str:
-    """查询 MR 作者的 GitLab 用户名(用于飞书卡片艾特)。失败返回空串,不影响通知。
+def _notify_active(channel: dict | None) -> bool:
+    """通知是否会真实发送(决定是否值得多查一次 MR 详情)。
 
-    channel: 项目绑定的推送配置(决定通知类型);为 None 时按全局 NOTIFY_* 配置判断。
+    channel 非 None(项目绑定推送配置)按会发送处理;否则看全局 NOTIFY_* 配置。
     """
-    if not notifier.needs_mr_author(channel) or not gl:
+    if channel is not None:
+        return True
+    return bool(config.NOTIFY_ENABLED and config.NOTIFY_WEBHOOK_URL)
+
+
+def register_git_user(user: dict) -> str:
+    """把 GitLab 用户对象登记进 git_user 表(幂等,绝不触碰 employee_number)。
+
+    两个来源:webhook 的 user/assignees(自带 email)与 REST MR author(无 email,
+    空值不清空 webhook 已得的邮箱)。缺 id/username 的对象直接跳过。
+    返回该用户的 employee_number(未维护/失败返回空串,调用方回退 open_id 艾特)。
+    """
+    user_id = str(user.get("id") or "").strip()
+    username = (user.get("username") or "").strip()
+    if not user_id or not username:
         return ""
     try:
-        mr = gl.get_merge_request(project_id, mr_iid)
-        return (mr.get("author") or {}).get("username") or ""
+        row = storage.user_repo.upsert_from_gitlab(
+            user_id=user_id,
+            name=(user.get("name") or "").strip(),
+            username=username,
+            email=(user.get("email") or "").strip(),
+        )
+        return (row.employee_number if row else "") or ""
     except Exception as e:
-        log.warning(f"查询 MR !{mr_iid} 作者失败(通知将不艾特): {e}")
+        log.warning(f"登记 GitLab 用户失败(user_id={user_id}, username={username},忽略): {e}")
         return ""
+
+
+def _mr_details(gl, project_id: str, mr_iid: str, channel: dict | None = None) -> tuple[str, str, str]:
+    """查询 MR 作者用户名/标题/工号(飞书卡片艾特 + 链接文案),顺带幂等刷新作者行。
+    失败返回空串三元组,不影响通知。
+
+    channel: 项目绑定的推送配置;为 None 时按全局 NOTIFY_* 配置判断是否值得查询。
+    """
+    if not gl or not _notify_active(channel):
+        return "", "", ""
+    try:
+        mr = gl.get_merge_request(project_id, mr_iid)
+        author = mr.get("author") or {}
+        return (
+            author.get("username") or "",
+            mr.get("title") or "",
+            register_git_user(author),
+        )
+    except Exception as e:
+        log.warning(f"查询 MR !{mr_iid} 作者/标题失败(通知将不艾特、不带标题): {e}")
+        return "", "", ""
 
 
 def _resolve_channel(project_id: str) -> dict | None:
@@ -47,13 +87,15 @@ def _resolve_channel(project_id: str) -> dict | None:
 
 
 def _submit_notify(*, project_url, source_branch, target_branch,
-                   approve, summary="", error=None,
+                   approve, summary="", error=None, markdown_summary="",
                    gl=None, project_id="", mr_iid=""):
     """后台投递审核结果通知(失败不影响主流程)。
 
     推送路由:项目绑定的推送配置优先,未绑定回退全局 NOTIFY_* 环境变量配置。
+    markdown_summary:回写 MR 的汇总详情,追加到推送消息(成功路径传入)。
     """
     channel = _resolve_channel(project_id)
+    mr_author, mr_title, mr_employee_number = _mr_details(gl, project_id, mr_iid, channel)
     try:
         executor.submit(
             notifier.dispatch,
@@ -63,7 +105,10 @@ def _submit_notify(*, project_url, source_branch, target_branch,
             approve=approve,
             summary=summary,
             error=error,
-            mr_author=_mr_author(gl, project_id, mr_iid, channel),
+            markdown_summary=markdown_summary,
+            mr_author=mr_author,
+            mr_employee_number=mr_employee_number,
+            mr_title=mr_title,
             mr_iid=mr_iid,
             channel=channel,
         )
@@ -131,6 +176,7 @@ def do_review_sync(req: ReviewRequest) -> ReviewResponse:
             target_branch=req.target_branch,
             approve=rr.approve,
             summary=rr.summary_text,
+            markdown_summary=rr.markdown_summary,
             gl=gl, project_id=req.project_id, mr_iid=req.mr_iid,
         )
 
@@ -321,6 +367,7 @@ def do_review_async(task_id: str):
             target_branch=task.target_branch,
             approve=rr.approve,
             summary=rr.summary_text,
+            markdown_summary=rr.markdown_summary,
             gl=gl, project_id=task.project_id, mr_iid=task.mr_iid,
         )
 

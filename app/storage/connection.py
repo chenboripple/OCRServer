@@ -251,3 +251,19 @@ def init_db():
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_project_tag_rel_tag ON project_tag_rel(tag_id)")
+        # GitLab 用户:webhook 的 user/assignees 自动登记(payload 自带 email),
+        # REST MR 作者幂等刷新;employee_number(工号)在配置页维护,
+        # 飞书推送优先以 <at id=工号> 艾特。upsert 绝不触碰 employee_number。
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS git_user (
+                user_id         TEXT PRIMARY KEY,
+                name            TEXT NOT NULL DEFAULT '',
+                username        TEXT NOT NULL,
+                email           TEXT NOT NULL DEFAULT '',
+                employee_number TEXT NOT NULL DEFAULT '',
+                created_at      TEXT NOT NULL,
+                updated_at      TEXT NOT NULL
+            )
+        """)
+        # username 不加唯一约束:GitLab 改名/回收用户名时避免 upsert-by-user_id 撞约束;查找一律按 user_id
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_git_user_username ON git_user(username)")

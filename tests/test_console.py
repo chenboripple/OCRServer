@@ -517,3 +517,41 @@ def test_token_test_endpoint_uses_stored_token(tmp_path, monkeypatch):
         assert resp.json() == {"ok": True, "username": "root"}
         # 服务端用库里的令牌调用,凭据不经页面
         assert seen["token"] == "glpat-test777"
+
+
+def test_git_user_api_list_update_clear_and_errors(tmp_path, monkeypatch):
+    with _config_client(tmp_path, monkeypatch) as client:
+        from app import storage
+
+        # 空库
+        assert client.get("/api/console/users").json() == {"items": []}
+
+        # 用户行只能由 webhook/审核自动登记
+        storage.user_repo.upsert_from_gitlab(
+            user_id="2486", username="chenbo.chen1",
+            name="陈博", email="chenbo.chen1@jtexpress.com",
+        )
+        items = client.get("/api/console/users").json()["items"]
+        assert len(items) == 1
+        user = items[0]
+        assert user["user_id"] == "2486"
+        assert user["username"] == "chenbo.chen1"
+        assert user["name"] == "陈博"
+        assert user["email"] == "chenbo.chen1@jtexpress.com"
+        assert user["employee_number"] == ""
+
+        # 维护工号
+        resp = client.put("/api/console/users/2486", json={"employee_number": "E00123"})
+        assert resp.status_code == 200
+        assert resp.json()["employee_number"] == "E00123"
+        assert storage.user_repo.get("2486").employee_number == "E00123"
+
+        # 留空 = 清空
+        resp = client.put("/api/console/users/2486", json={"employee_number": ""})
+        assert resp.status_code == 200
+        assert resp.json()["employee_number"] == ""
+        assert storage.user_repo.get("2486").employee_number == ""
+
+        # 不存在的用户 -> 404;超长工号(>64 字) -> 422
+        assert client.put("/api/console/users/999", json={"employee_number": "E1"}).status_code == 404
+        assert client.put("/api/console/users/2486", json={"employee_number": "E" * 65}).status_code == 422

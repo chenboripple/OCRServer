@@ -46,6 +46,18 @@ class ProjectTag:
 
 
 @dataclass
+class GitUser:
+    """GitLab 用户:webhook 的 user/assignees 自动登记;employee_number(工号)控制台维护。"""
+    user_id: str
+    username: str
+    name: str = ""
+    email: str = ""
+    employee_number: str = ""
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+@dataclass
 class ReviewTask:
     task_id: str
     project_id: str

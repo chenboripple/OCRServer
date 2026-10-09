@@ -34,6 +34,14 @@ def _mr_payload(target="master", title="ocr fix", action="open", commit="a" * 40
     }
 
 
+def _post_webhook(client, payload):
+    return client.post(
+        "/gitlab/codeReview",
+        json=payload,
+        headers={"X-Gitlab-Event": "Merge Request Hook", "X-Gitlab-Token": "test-webhook-secret"},
+    )
+
+
 def test_health(app_client):
     r = app_client.get("/health")
     assert r.status_code == 200
@@ -119,3 +127,46 @@ def test_webhook_queue_limit_rejects(app_client, monkeypatch):
 def test_webhook_without_secret_is_rejected(app_client):
     r = app_client.post("/gitlab/codeReview", json=_mr_payload(), headers={"X-Gitlab-Event": "Merge Request Hook"})
     assert r.status_code == 403
+
+
+# ── Git 用户自动登记(git_user) ───────────────────────────
+
+def _user(id, name, username, email):
+    return {"id": id, "name": name, "username": username, "email": email}
+
+
+def test_webhook_registers_user_and_assignees(app_client):
+    from app import storage
+
+    payload = _mr_payload()
+    payload["user"] = _user(2486, "陈博", "chenbo.chen1", "chenbo.chen1@jtexpress.com")
+    payload["assignees"] = [
+        _user(1024, "张三", "zhangsan", "zhangsan@jtexpress.com"),
+        _user(2048, "李四", "lisi", "lisi@jtexpress.com"),
+    ]
+    r = _post_webhook(app_client, payload)
+    assert r.status_code == 200
+
+    users = {u.user_id: u for u in storage.user_repo.list()}
+    assert set(users) == {"2486", "1024", "2048"}
+    assert users["2486"].email == "chenbo.chen1@jtexpress.com"
+    assert users["2486"].name == "陈博"
+    assert users["1024"].username == "zhangsan"
+    assert users["2048"].email == "lisi@jtexpress.com"
+    # 自动登记不带工号
+    assert all(u.employee_number == "" for u in users.values())
+
+
+def test_webhook_registers_users_even_when_review_skipped(app_client):
+    """触发策略跳过(分支/标题都不匹配)的 webhook 也要完成用户登记。"""
+    from app import storage
+
+    payload = _mr_payload(target="dev", title="just a fix")
+    payload["user"] = _user(2486, "陈博", "chenbo.chen1", "chenbo.chen1@jtexpress.com")
+    r = _post_webhook(app_client, payload)
+    assert r.status_code == 200
+    assert r.json()["status"] == "skipped"
+
+    user = storage.user_repo.get("2486")
+    assert user is not None
+    assert user.email == "chenbo.chen1@jtexpress.com"

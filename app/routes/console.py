@@ -18,6 +18,7 @@ from ..schemas import (
     GitTokenBind,
     GitTokenCreate,
     GitTokenUpdate,
+    GitUserUpdate,
     ProjectBind,
     ProjectCreate,
     ProjectTagsSet,
@@ -339,6 +340,35 @@ def delete_tag(tag_id: str):
         raise HTTPException(status_code=404, detail="Tag not found")
     # 项目绑定关系由外键 ON DELETE CASCADE 自动清除
     storage.tag_repo.delete(tag_id)
+
+
+# ── 配置页:Git 用户(git_user) ──────────────────────────
+# 用户行由 webhook(user/assignees)与审核任务自动登记,不提供新增/删除;
+# 仅支持维护工号(employee_number,飞书推送优先 <at id=工号> 艾特)。
+
+def _git_user_payload(user) -> dict:
+    return {
+        "user_id": user.user_id,
+        "name": user.name,
+        "username": user.username,
+        "email": user.email,
+        "employee_number": user.employee_number,
+        "created_at": user.created_at,
+        "updated_at": user.updated_at,
+    }
+
+
+@router.get("/api/console/users")
+def list_users():
+    return {"items": [_git_user_payload(u) for u in storage.user_repo.list()]}
+
+
+@router.put("/api/console/users/{user_id}")
+def update_user(user_id: str, body: GitUserUpdate):
+    user = storage.user_repo.update_employee_number(user_id, employee_number=body.employee_number)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return _git_user_payload(user)
 
 
 # ── 配置页:项目清单(review_project) ─────────────────────

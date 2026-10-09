@@ -59,6 +59,11 @@ createApp({
       tagSaving: false,
       tagError: "",
       tagModal: { open: false, editingId: "", name: "" },
+      // ── 配置页:Git 用户 ──
+      users: [],
+      userModal: { open: false, editingId: "", username: "", employeeNumber: "" },
+      userSaving: false,
+      userError: "",
       // ── 配置页:项目清单 ──
       projectData: { items: [], total: 0, page: 1, page_size: 50 },
       projectPage: 1,
@@ -118,7 +123,7 @@ createApp({
       this.loadConfigData();
     },
     async loadConfigData() {
-      await Promise.all([this.loadChannels(), this.loadTokens(), this.loadProjects(1), this.loadTags()]);
+      await Promise.all([this.loadChannels(), this.loadTokens(), this.loadProjects(1), this.loadTags(), this.loadUsers()]);
     },
     async loadChannels() {
       try {
@@ -435,6 +440,47 @@ createApp({
           this.tagError = `删除失败: ${String(e)}`;
         }
       });
+    },
+    // ── 配置页:Git 用户 ────────────────────────────────
+    async loadUsers() {
+      try {
+        const resp = await fetch(this.apiUrl("/api/console/users"));
+        if (!resp.ok) { throw new Error(`HTTP ${resp.status}`); }
+        const data = await resp.json();
+        this.users = data.items || [];
+      } catch (e) {
+        this.userError = `加载 Git 用户失败: ${String(e)}`;
+      }
+    },
+    openUserEdit(u) {
+      this.userModal = { open: true, editingId: u.user_id, username: u.username, employeeNumber: u.employee_number || "" };
+      this.userError = "";
+    },
+    cancelUserModal() {
+      this.userModal = { open: false, editingId: "", username: "", employeeNumber: "" };
+      this.userError = "";
+    },
+    async submitUserModal() {
+      this.userError = "";
+      const form = this.userModal;
+      this.userSaving = true;
+      try {
+        const resp = await fetch(this.apiUrl(`/api/console/users/${encodeURIComponent(form.editingId)}`), {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ employee_number: form.employeeNumber })
+        });
+        if (!resp.ok) {
+          const detail = await resp.json().catch(() => ({}));
+          throw new Error(detail.detail || `HTTP ${resp.status}`);
+        }
+        this.cancelUserModal();
+        await this.loadUsers();
+      } catch (e) {
+        this.userError = `保存工号失败: ${String(e)}`;
+      } finally {
+        this.userSaving = false;
+      }
     },
     toggleProjectTagFilter(tagId) {
       if (this.projectTagFilter.includes(tagId)) {
@@ -799,7 +845,7 @@ createApp({
 
       // 页签:projects | channels | tokens | tags;旧链接 tab=config 归入 projects
       const tab = read("tab", "review");
-      this.activeTab = ["projects", "channels", "tokens", "tags"].includes(tab) ? tab : (tab === "config" ? "projects" : "review");
+      this.activeTab = ["projects", "channels", "tokens", "tags", "users"].includes(tab) ? tab : (tab === "config" ? "projects" : "review");
 
       this.filters.status = read("status");
       this.filters.source = read("source");
