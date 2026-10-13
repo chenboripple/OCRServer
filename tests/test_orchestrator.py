@@ -74,6 +74,8 @@ def test_cancel_closed_mr_updates_pending_and_status(temp_storage):
     assert updated.status == "cancelled"
     assert updated.gitlab_posted == 1
     assert "已关闭/合并" in (updated.summary or "")
+    # cancelled 是终态,必须落 finished_at,否则控制台耗时会一直增长
+    assert updated.finished_at
 
 
 def test_cancel_closed_mr_without_pending_posts_note(temp_storage):

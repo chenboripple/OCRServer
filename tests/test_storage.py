@@ -54,6 +54,48 @@ def test_update_status(temp_storage):
     assert t.gitlab_posted == 1
 
 
+def test_terminal_statuses_stamp_finished_at(temp_storage):
+    """cancelled / superseded 同为终态,必须落 finished_at,否则前端耗时会一直按当前时间增长。"""
+    for status in ("done", "failed", "cancelled", "superseded"):
+        tid, _ = _make(mr_iid=status, commit_sha=f"sha-{status}")
+        storage.update_status(tid, "running")
+        storage.update_status(tid, status, summary="x")
+        t = storage.get_task(tid)
+        assert t.status == status
+        assert t.started_at
+        assert t.finished_at, f"{status} 未落 finished_at"
+
+
+def test_auto_timestamps_are_not_overwritten(temp_storage):
+    """自动补的时间戳只写一次:二次 running、补发成功都不得覆盖真实时刻。"""
+    tid, _ = _make()
+    storage.update_status(tid, "running")
+    started = storage.get_task(tid).started_at
+    storage.update_status(tid, "done", approve=1, summary="ok", gitlab_posted=0)
+    finished = storage.get_task(tid).finished_at
+    assert started and finished
+
+    # orchestrator 异步分支会再置一次 running,不应重置 claim() 记录的开始时刻
+    storage.update_status(tid, "running")
+    assert storage.get_task(tid).started_at == started
+
+    # repost worker 补发成功后再写一次终态,finished_at 应停在首次完成时刻
+    storage.update_status(tid, "done", gitlab_posted=1)
+    t = storage.get_task(tid)
+    assert t.finished_at == finished
+    assert t.gitlab_posted == 1
+
+
+def test_explicit_started_at_reset_still_honored(temp_storage):
+    """恢复流程显式传 started_at=None 时必须能清空,不能被 COALESCE 吞掉。"""
+    tid, _ = _make()
+    storage.update_status(tid, "running")
+    assert storage.get_task(tid).started_at
+
+    storage.update_status(tid, "queued", started_at=None)
+    assert storage.get_task(tid).started_at is None
+
+
 def test_queued_count(temp_storage):
     assert storage.get_queued_count() == 0
     _make()

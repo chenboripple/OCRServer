@@ -8,6 +8,12 @@ from typing import List, Optional
 from ..connection import _db
 from ..models import ReviewTask
 
+# 终态:任务不会再推进,必须落 finished_at,否则前端耗时会一直按当前时间增长。
+TERMINAL_STATUSES = ("done", "failed", "cancelled", "superseded")
+
+_UPDATABLE_FIELDS = ("approve", "summary", "stats_json", "error", "gitlab_posted",
+                     "pending_discussion_id", "pending_note_id", "started_at", "finished_at")
+
 
 def _row_to_task(row) -> ReviewTask:
     return ReviewTask(
@@ -187,16 +193,23 @@ class TaskRepository:
         set_clauses = ["status = ?"]
         params = [status]
 
+        # 自动补的时间戳。调用方显式传值时不介入(如恢复流程要把 started_at 重置为 None)。
+        stamps = {}
         if status == "running" and "started_at" not in fields:
-            fields["started_at"] = now
-        if status in ("done", "failed") and "finished_at" not in fields:
-            fields["finished_at"] = now
+            stamps["started_at"] = now
+        if status in TERMINAL_STATUSES and "finished_at" not in fields:
+            stamps["finished_at"] = now
 
         for key, value in fields.items():
-            if key in ("approve", "summary", "stats_json", "error", "gitlab_posted",
-                       "pending_discussion_id", "pending_note_id", "started_at", "finished_at"):
+            if key in _UPDATABLE_FIELDS:
                 set_clauses.append(f"{key} = ?")
                 params.append(value)
+
+        # 自动补的时间戳只写一次(COALESCE):补发成功、二次 running 等后续更新
+        # 不得覆盖 claim()/首次完成时记录的真实时刻,否则耗时会被拉长或缩短。
+        for key, value in stamps.items():
+            set_clauses.append(f"{key} = COALESCE({key}, ?)")
+            params.append(value)
 
         params.append(task_id)
         with _db() as conn:
