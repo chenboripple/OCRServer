@@ -73,7 +73,10 @@ def test_console_page_and_apis(tmp_path, monkeypatch):
     with TestClient(main.app) as client:
         page = client.get("/console")
         assert page.status_code == 200
-        assert "OCR Review Console" in page.text
+        # 页面文案已 i18n 化(h1 是 {{ t('header.title') }}),这里只校验结构:
+        # 根节点 + 词典脚本按正确顺序就位。品牌文案断言移到 i18n 词典测试里。
+        assert 'id="app"' in page.text
+        assert "console/assets/i18n.js" in page.text
 
         list_resp = client.get("/api/console/tasks?page=1&page_size=10")
         assert list_resp.status_code == 200
@@ -555,3 +558,131 @@ def test_git_user_api_list_update_clear_and_errors(tmp_path, monkeypatch):
         # 不存在的用户 -> 404;超长工号(>64 字) -> 422
         assert client.put("/api/console/users/999", json={"employee_number": "E1"}).status_code == 404
         assert client.put("/api/console/users/2486", json={"employee_number": "E" * 65}).status_code == 422
+
+
+# ── 控制台国际化(i18n.js 词典 + 后端错误码) ──────────────────
+
+def _extract_i18n_messages():
+    """从 i18n.js 抠出 MESSAGES 字典。
+
+    词典用受控语法书写(标识符键 + 双引号字符串 + 嵌套对象),给键补上引号即成合法 JSON。
+    解析抛错说明写法越界(值里出现裸键等),测试应当红,提醒改回受控语法。
+    """
+    import json
+    import re
+    from app.routes import console as console_routes
+
+    src = (console_routes._CONSOLE_ASSET_DIR / "i18n.js").read_text(encoding="utf-8")
+    start = src.index("var MESSAGES = {") + len("var MESSAGES =")
+
+    # 花括号配平到字典结束。字符串里的 {n} 占位符不算:逐字符扫描并跟踪引号与转义。
+    depth, in_str, escaped, end = 0, False, False, None
+    for i in range(start, len(src)):
+        ch = src[i]
+        if in_str:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    assert end, "MESSAGES 字典未闭合"
+
+    # 字符串值里的 {n} 后面不跟冒号,不会被误当键;键名只有标识符一种写法
+    json_text = re.sub(r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:', r'\1"\2":', src[start:end])
+    return json.loads(json_text)
+
+
+def _flatten_keys(node, prefix=""):
+    keys = set()
+    for k, v in node.items():
+        path = f"{prefix}{k}"
+        if isinstance(v, dict):
+            keys |= _flatten_keys(v, path + ".")
+        else:
+            keys.add(path)
+    return keys
+
+
+def _normalize_plural(keys):
+    """_one / _other 归并为词干:中文单形、英文双形,语义上是同一个键。"""
+    import re
+    return {re.sub(r"_(?:one|other)$", "", k) for k in keys}
+
+
+def test_i18n_dictionary_key_parity():
+    messages = _extract_i18n_messages()
+    zh = _normalize_plural(_flatten_keys(messages["zh-CN"]))
+    en = _normalize_plural(_flatten_keys(messages["en"]))
+    assert zh == en, f"中英词典键集不一致: 仅中文={sorted(zh - en)} 仅英文={sorted(en - zh)}"
+    # 品牌文案断言(原 test_console_page_and_apis 里的页面级检查迁到这里)
+    assert messages["en"]["header"]["title"] == "OCR Review Console"
+
+
+def test_i18n_asset_whitelisted():
+    # i18n.js 不进白名单会 404,console.js 拿不到 OcrI18n 直接起不来;
+    # 想新增静态资源必须同步扩 _CONSOLE_ALLOWED_ASSETS 与 console.html 的 <script> 标签
+    from app.routes import console as console_routes
+
+    assert "i18n.js" in console_routes._CONSOLE_ALLOWED_ASSETS
+    html = (console_routes._CONSOLE_HTML).read_text(encoding="utf-8")
+    assert 'assets/i18n.js' in html
+
+
+def test_backend_error_codes_have_translations():
+    """routes/console.py 里的每个 _err 错误码都要能查到 apierr.<code>,否则前端只能回落原文。"""
+    import re
+    from app.routes import console as console_routes
+
+    messages = _extract_i18n_messages()
+    src = console_routes.__file__
+    with open(src, encoding="utf-8") as f:
+        route_text = f.read()
+    codes = set(re.findall(r'_err\("([a-z_]+)"', route_text))
+    codes.add("gitlab_url_missing")  # 走 {ok: False, error_code: ...} 出参,不走 _err
+
+    assert codes, "没抓到任何错误码,正则或调用点写法变了"
+    for code in sorted(codes):
+        assert f"apierr.{code}" in _flatten_keys(messages["zh-CN"]), f"zh-CN 缺 apierr.{code}"
+        assert f"apierr.{code}" in _flatten_keys(messages["en"]), f"en 缺 apierr.{code}"
+
+
+def test_template_referenced_keys_exist_in_dictionary():
+    """模板/脚本里写死的键必须能在词典查到,缺键渲染成键名本身(不会白屏但很难看)。
+
+    动态拼接的键(`` `status.${s}` `` 等)不被正则命中,由上面的键集一致性与人工走查兜底。
+    """
+    import re
+    from app.routes import console as console_routes
+
+    known = _flatten_keys(_extract_i18n_messages()["zh-CN"])
+    used = set()
+    for name in ("console.html", "console.js"):
+        text = (console_routes._CONSOLE_ASSET_DIR / name).read_text(encoding="utf-8")
+        used |= set(re.findall(r"\bt(?:c)?\(\s*'([a-zA-Z0-9_.]+)'", text))
+        used |= set(re.findall(r'\b(?:msg|fail|wrap)\(\s*"([a-zA-Z0-9_.]+)"', text))
+    missing = sorted(k for k in used if k not in known)
+    assert not missing, f"模板引用了词典里不存在的键: {missing}"
+
+
+def test_conflict_returns_machine_readable_code(tmp_path, monkeypatch):
+    """detail 从中文字符串改为 {code, ...} 对象:前端按 code 翻译,旧断言只看状态码不受影响。"""
+    with _config_client(tmp_path, monkeypatch) as client:
+        payload = {"name": "同名配置", "type": "feishu",
+                   "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/abcdefgh"}
+        assert client.post("/api/console/channels", json=payload).status_code == 201
+        resp = client.post("/api/console/channels", json=payload)
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["code"] == "duplicate_channel_name"
+        assert detail["name"] == "同名配置"

@@ -3,12 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- <title> 与 <html lang> 由 console.js 的 applyLang() 按当前界面语言覆盖 -->
   <title>OCR Server Console</title>
-  <link rel="stylesheet" href="console/assets/console.css?v=20261008-1" />
+  <link rel="stylesheet" href="console/assets/console.css?v=20261012-2" />
   <script defer src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-  <script defer src="console/assets/console.js?v=20261008-1"></script>
+  <!-- i18n.js 必须在 console.js 之前:后者初始化时就要读 OcrI18n.detectLang() -->
+  <script defer src="console/assets/i18n.js?v=20261012-2"></script>
+  <script defer src="console/assets/console.js?v=20261012-2"></script>
 </head>
 <body>
+  <!--
+    本文件所有界面文案一律走 t('键') / tc('键', n) / msgText(描述符),不留字面量。
+    词典在 i18n.js,键名与中英文两份必须一一对应(见 tests/test_console.py 的键集校验)。
+    注意:v-for 的循环变量不能叫 t —— 会遮蔽翻译方法。
+  -->
   <div id="app">
     <div
       v-if="hoverTooltip"
@@ -19,296 +27,301 @@
       <div class="brand">
         <span class="dot"></span>
         <div>
-          <h1>OCR Review Console</h1>
-          <div class="muted">Vue3 portal for requests, analysis results and push config</div>
+          <h1>{{ t('header.title') }}</h1>
+          <div class="muted">{{ t('header.subtitle') }}</div>
         </div>
       </div>
-      <div class="muted top-meta">Last refresh: {{ formatTime(lastRefreshAt) }}</div>
+      <div class="top-right">
+        <button
+          class="ghost btn-sm lang-toggle"
+          type="button"
+          @click="toggleLang"
+          :aria-label="t('lang.switchTo')"
+          :title="t('lang.switchTo')"
+        >{{ langLabel() }}</button>
+        <div class="muted top-meta">{{ t('header.lastRefresh') }}{{ formatTime(lastRefreshAt) }}</div>
+      </div>
     </header>
 
     <nav class="tabs">
-      <button class="tab" :class="{ active: activeTab === 'review' }" @click="switchTab('review')">审核看板</button>
-      <button class="tab" :class="{ active: activeTab === 'projects' }" @click="switchTab('projects')">项目清单</button>
-      <button class="tab" :class="{ active: activeTab === 'channels' }" @click="switchTab('channels')">推送配置</button>
-      <button class="tab" :class="{ active: activeTab === 'tokens' }" @click="switchTab('tokens')">Git 令牌</button>
-      <button class="tab" :class="{ active: activeTab === 'tags' }" @click="switchTab('tags')">项目标签</button>
-      <button class="tab" :class="{ active: activeTab === 'users' }" @click="switchTab('users')">Git 用户</button>
+      <button class="tab" :class="{ active: activeTab === 'review' }" @click="switchTab('review')">{{ t('nav.review') }}</button>
+      <button class="tab" :class="{ active: activeTab === 'projects' }" @click="switchTab('projects')">{{ t('nav.projects') }}</button>
+      <button class="tab" :class="{ active: activeTab === 'channels' }" @click="switchTab('channels')">{{ t('nav.channels') }}</button>
+      <button class="tab" :class="{ active: activeTab === 'tokens' }" @click="switchTab('tokens')">{{ t('nav.tokens') }}</button>
+      <button class="tab" :class="{ active: activeTab === 'tags' }" @click="switchTab('tags')">{{ t('nav.tags') }}</button>
+      <button class="tab" :class="{ active: activeTab === 'users' }" @click="switchTab('users')">{{ t('nav.users') }}</button>
     </nav>
 
     <main class="layout">
       <template v-if="activeTab === 'review'">
       <section class="card console-overview">
         <div class="section-title">
-          <span>Dashboard</span>
+          <span>{{ t('dashboard.title') }}</span>
           <div class="section-actions">
             <select v-model.number="dashboardDays" @change="applyFilters">
-              <option :value="7">7 days</option>
-              <option :value="14">14 days</option>
-              <option :value="30">30 days</option>
+              <option :value="7">{{ t('dashboard.days7') }}</option>
+              <option :value="14">{{ t('dashboard.days14') }}</option>
+              <option :value="30">{{ t('dashboard.days30') }}</option>
             </select>
-            <button class="ghost" @click="reloadAll">Refresh</button>
+            <button class="ghost" @click="reloadAll">{{ t('common.refresh') }}</button>
           </div>
         </div>
         <div class="kpis">
-          <div class="kpi"><div class="label">Total tasks</div><div class="value">{{ dashboard.overview.total || 0 }}</div></div>
-          <div class="kpi"><div class="label">Done</div><div class="value">{{ dashboard.overview.done_count || 0 }}</div></div>
-          <div class="kpi"><div class="label">Failed</div><div class="value">{{ dashboard.overview.failed_count || 0 }}</div></div>
-          <div class="kpi"><div class="label">Queued + Running</div><div class="value">{{ (dashboard.overview.queued_count || 0) + (dashboard.overview.running_count || 0) }}</div></div>
-          <div class="kpi"><div class="label">Approve Rate</div><div class="value">{{ pct(dashboard.overview.approve_rate || 0) }}</div></div>
-          <div class="kpi"><div class="label">Total Tokens</div><div class="value">{{ number(dashboard.stats.total_tokens || 0) }}</div></div>
+          <div class="kpi"><div class="label">{{ t('dashboard.totalTasks') }}</div><div class="value">{{ dashboard.overview.total || 0 }}</div></div>
+          <div class="kpi"><div class="label">{{ t('dashboard.done') }}</div><div class="value">{{ dashboard.overview.done_count || 0 }}</div></div>
+          <div class="kpi"><div class="label">{{ t('dashboard.failed') }}</div><div class="value">{{ dashboard.overview.failed_count || 0 }}</div></div>
+          <div class="kpi"><div class="label">{{ t('dashboard.queuedRunning') }}</div><div class="value">{{ (dashboard.overview.queued_count || 0) + (dashboard.overview.running_count || 0) }}</div></div>
+          <div class="kpi"><div class="label">{{ t('dashboard.approveRate') }}</div><div class="value">{{ pct(dashboard.overview.approve_rate || 0) }}</div></div>
+          <div class="kpi"><div class="label">{{ t('dashboard.totalTokens') }}</div><div class="value">{{ number(dashboard.stats.total_tokens || 0) }}</div></div>
         </div>
         <div class="toolbar">
           <div class="field">
-            <label>Status</label>
+            <label>{{ t('filters.status') }}</label>
             <select v-model="filters.status">
-              <option value="">All</option>
-              <option value="queued">queued</option>
-              <option value="running">running</option>
-              <option value="done">done</option>
-              <option value="failed">failed</option>
-              <option value="cancelled">cancelled</option>
+              <option value="">{{ t('common.all') }}</option>
+              <option v-for="s in statusValues" :key="s" :value="s">{{ statusLabel(s) }}</option>
             </select>
           </div>
 
           <div class="field">
-            <label>Source</label>
+            <label>{{ t('filters.source') }}</label>
             <select v-model="filters.source">
-              <option value="">All</option>
+              <option value="">{{ t('common.all') }}</option>
               <option value="webhook">webhook</option>
               <option value="api">api</option>
             </select>
           </div>
 
           <div class="field">
-            <label>Approve</label>
+            <label>{{ t('filters.approve') }}</label>
             <select v-model="filters.approve">
-              <option value="">All</option>
-              <option value="true">true</option>
-              <option value="false">false</option>
+              <option value="">{{ t('common.all') }}</option>
+              <option value="true">{{ t('approve.pass') }}</option>
+              <option value="false">{{ t('approve.reject') }}</option>
             </select>
           </div>
 
           <div class="field">
-            <label>Project ID</label>
-            <input v-model.trim="filters.project_id" placeholder="project id" />
+            <label>{{ t('filters.projectId') }}</label>
+            <input v-model.trim="filters.project_id" :placeholder="t('filters.projectIdPh')" />
           </div>
 
           <div class="field">
-            <label>标签</label>
+            <label>{{ t('filters.tag') }}</label>
             <select v-model="filters.tag_id">
-              <option value="">All</option>
-              <option v-for="t in tags" :key="t.tag_id" :value="t.tag_id">{{ t.name }}</option>
+              <option value="">{{ t('common.all') }}</option>
+              <option v-for="tg in tags" :key="tg.tag_id" :value="tg.tag_id">{{ tg.name }}</option>
             </select>
           </div>
 
           <div class="field">
-            <label>MR IID</label>
-            <input v-model.trim="filters.mr_iid" placeholder="mr iid" />
+            <label>{{ t('filters.mrIid') }}</label>
+            <input v-model.trim="filters.mr_iid" :placeholder="t('filters.mrIidPh')" />
           </div>
 
           <div class="field field-span-2">
-            <label>Keyword</label>
-            <input v-model.trim="filters.q" placeholder="task id, branch, summary, error, session" />
+            <label>{{ t('filters.keyword') }}</label>
+            <input v-model.trim="filters.q" :placeholder="t('filters.keywordPh')" />
           </div>
 
           <div class="field">
-            <label>Actions</label>
+            <label>{{ t('filters.actions') }}</label>
             <div class="inline-actions">
-              <button @click="applyFilters">Search</button>
-              <button class="ghost" @click="resetFilters">Reset</button>
+              <button @click="applyFilters">{{ t('common.search') }}</button>
+              <button class="ghost" @click="resetFilters">{{ t('common.reset') }}</button>
             </div>
           </div>
         </div>
+        <!-- summary / finding.content 由服务端 REVIEW_LANGUAGE 生成,不随界面语言切换,提前说明避免被当成 bug -->
+        <p class="muted config-hint">{{ t('note.contentLanguage') }}</p>
       </section>
 
       <section class="card">
         <div class="section-title">
-          <span>Tasks</span>
-          <span class="muted">{{ taskData.total }} total</span>
+          <span>{{ t('tasks.title') }}</span>
+          <span class="muted">{{ t('tasks.totalCount', { n: taskData.total }) }}</span>
         </div>
         <div class="table-wrap">
           <table class="tasks-table">
             <thead>
               <tr>
-                <th class="col-project-name">Project</th>
-                <th class="col-mr">MR</th>
-                <th class="col-status">Status</th>
-                <th class="col-approve">Approve</th>
-                <th class="col-time">Dispatched</th>
-                <th class="col-time col-started">Started</th>
-                <th class="col-time col-finished">Finished</th>
-                <th class="col-elapsed">Elapsed(s)</th>
-                <th class="col-task">Task</th>
-                <th class="col-source">Source</th>
-                <th class="col-findings">Findings</th>
-                <th class="col-stats">Stats</th>
-                <th class="col-summary">Summary/Error</th>
+                <th class="col-project-name">{{ t('tasks.col.project') }}</th>
+                <th class="col-mr">{{ t('tasks.col.mr') }}</th>
+                <th class="col-status">{{ t('tasks.col.status') }}</th>
+                <th class="col-approve">{{ t('tasks.col.approve') }}</th>
+                <th class="col-time">{{ t('tasks.col.dispatched') }}</th>
+                <th class="col-time col-started">{{ t('tasks.col.started') }}</th>
+                <th class="col-time col-finished">{{ t('tasks.col.finished') }}</th>
+                <th class="col-elapsed">{{ t('tasks.col.elapsed') }}</th>
+                <th class="col-task">{{ t('tasks.col.task') }}</th>
+                <th class="col-source">{{ t('tasks.col.source') }}</th>
+                <th class="col-findings">{{ t('tasks.col.findings') }}</th>
+                <th class="col-stats">{{ t('tasks.col.stats') }}</th>
+                <th class="col-summary">{{ t('tasks.col.summary') }}</th>
               </tr>
             </thead>
             <tbody>
               <tr
-                v-for="t in taskData.items"
-                :key="t.task_id"
-                @click="selectTask(t.task_id)"
+                v-for="task in taskData.items"
+                :key="task.task_id"
+                @click="selectTask(task.task_id)"
                 class="task-row"
-                :class="{ active: t.task_id === selectedTaskId }"
+                :class="{ active: task.task_id === selectedTaskId }"
               >
                 <td class="col-project-name">
-                  <div>{{ projectName(t) }}</div>
-                  <div class="muted">{{ t.project_id }}</div>
+                  <div>{{ projectName(task) }}</div>
+                  <div class="muted">{{ task.project_id }}</div>
                 </td>
                 <td class="col-mr">
-                  <div>!{{ t.mr_iid }}</div>
-                  <div class="muted">{{ t.source_branch }} -> {{ t.target_branch }}</div>
+                  <div>!{{ task.mr_iid }}</div>
+                  <div class="muted">{{ task.source_branch }} -> {{ task.target_branch }}</div>
                 </td>
-                <td class="col-status"><span class="badge" :class="'s-' + t.status">{{ t.status }}</span></td>
+                <!-- 徽标 class 仍由原始枚举派生,只有可见文字翻译 -->
+                <td class="col-status"><span class="badge" :class="'s-' + task.status">{{ statusLabel(task.status) }}</span></td>
                 <td class="col-approve">
-                  <span v-if="t.approve === true" class="badge s-done">pass</span>
-                  <span v-else-if="t.approve === false" class="badge s-failed">reject</span>
+                  <span v-if="task.approve === true" class="badge s-done">{{ t('approve.pass') }}</span>
+                  <span v-else-if="task.approve === false" class="badge s-failed">{{ t('approve.reject') }}</span>
                   <span v-else class="muted">-</span>
                 </td>
-                <td class="col-time">{{ compactTime(t.created_at) }}</td>
-                <td class="col-time col-started">{{ compactTime(t.started_at) }}</td>
-                <td class="col-time col-finished">{{ compactTime(t.finished_at) }}</td>
-                <td class="col-elapsed">{{ elapsedSeconds(t.started_at, t.finished_at) }}</td>
-                <td class="col-task"><span class="muted">{{ short(t.task_id) }}</span></td>
-                <td class="col-source">{{ t.source || '-' }}</td>
+                <td class="col-time">{{ compactTime(task.created_at) }}</td>
+                <td class="col-time col-started">{{ compactTime(task.started_at) }}</td>
+                <td class="col-time col-finished">{{ compactTime(task.finished_at) }}</td>
+                <td class="col-elapsed">{{ elapsedSeconds(task) }}</td>
+                <td class="col-task"><span class="muted">{{ short(task.task_id) }}</span></td>
+                <td class="col-source">{{ task.source || '-' }}</td>
                 <td class="col-findings">
-                  <span class="sev-critical">C {{ t.finding_counts.critical }}</span>
-                  <span class="sev-high"> H {{ t.finding_counts.high }}</span>
-                  <span class="sev-medium"> M {{ t.finding_counts.medium }}</span>
-                  <span class="sev-low"> L {{ t.finding_counts.low }}</span>
+                  <span class="sev-critical">C {{ task.finding_counts.critical }}</span>
+                  <span class="sev-high"> H {{ task.finding_counts.high }}</span>
+                  <span class="sev-medium"> M {{ task.finding_counts.medium }}</span>
+                  <span class="sev-low"> L {{ task.finding_counts.low }}</span>
                 </td>
                 <td class="col-stats">
-                  <div>files: {{ t.stats.files_reviewed || '-' }}</div>
-                  <div>tokens: {{ t.stats.total_tokens || '-' }}</div>
+                  <div>{{ t('tasks.files') }} {{ task.stats.files_reviewed || '-' }}</div>
+                  <div>{{ t('tasks.tokens') }} {{ task.stats.total_tokens || '-' }}</div>
                 </td>
-                <td class="col-summary task-summary" :title="[t.summary, t.error].filter(Boolean).join(' | ')">
+                <td class="col-summary task-summary" :title="[task.summary, task.error].filter(Boolean).join(' | ')">
                   <div
                     class="task-summary-item"
-                    :class="{ 'has-tooltip': t.summary }"
-                    :data-tooltip="t.summary || ''"
-                    @mouseenter="showTooltip($event, t.summary)"
+                    :class="{ 'has-tooltip': task.summary }"
+                    :data-tooltip="task.summary || ''"
+                    @mouseenter="showTooltip($event, task.summary)"
                     @mouseleave="hideTooltip"
                   >
-                    <span class="task-summary-text">{{ t.summary || '-' }}</span>
+                    <span class="task-summary-text">{{ task.summary || '-' }}</span>
                   </div>
                   <div
-                    v-if="t.error"
+                    v-if="task.error"
                     class="task-summary-item muted mt-4 has-tooltip"
-                    :data-tooltip="t.error"
-                    @mouseenter="showTooltip($event, t.error)"
+                    :data-tooltip="task.error"
+                    @mouseenter="showTooltip($event, task.error)"
                     @mouseleave="hideTooltip"
                   >
-                    <span class="task-summary-text">{{ t.error }}</span>
+                    <span class="task-summary-text">{{ task.error }}</span>
                   </div>
                 </td>
               </tr>
               <tr v-if="taskData.items.length === 0">
-                <td colspan="13" class="muted">No tasks.</td>
+                <td colspan="13" class="muted">{{ t('tasks.empty') }}</td>
               </tr>
             </tbody>
           </table>
         </div>
         <div class="pager">
-          <div>Page {{ taskPage }} / {{ taskPages }}</div>
+          <div>{{ t('common.page', { cur: taskPage, total: taskPages }) }}</div>
           <div class="pager-actions">
-            <button class="ghost" :disabled="taskPage <= 1" @click="changeTaskPage(taskPage - 1)">Prev</button>
-            <button class="ghost" :disabled="taskPage >= taskPages" @click="changeTaskPage(taskPage + 1)">Next</button>
+            <button class="ghost" :disabled="taskPage <= 1" @click="changeTaskPage(taskPage - 1)">{{ t('common.prev') }}</button>
+            <button class="ghost" :disabled="taskPage >= taskPages" @click="changeTaskPage(taskPage + 1)">{{ t('common.next') }}</button>
           </div>
         </div>
-        <div v-if="taskError" class="err">{{ taskError }}</div>
+        <div v-if="taskError" class="err">{{ msgText(taskError) }}</div>
       </section>
 
       <section class="split">
         <article class="card">
           <div class="section-title">
-            <span>Task Detail</span>
+            <span>{{ t('detail.title') }}</span>
             <div class="task-detail-head">
-              <span class="muted task-detail-id">{{ selectedTaskId || 'none selected' }}</span>
+              <span class="muted task-detail-id">{{ selectedTaskId || t('detail.noneSelected') }}</span>
               <button
                 v-if="taskDetail && taskDetail.session_id"
                 class="ghost btn-sm"
                 @click="copySessionId"
               >
-                Copy session_id
+                {{ t('detail.copySession') }}
               </button>
             </div>
           </div>
           <div class="detail" v-if="taskDetail">
             <div class="grid-2">
-              <div class="kv"><div class="k">Task ID</div><div class="v">{{ taskDetail.task_id }}</div></div>
-              <div class="kv"><div class="k">Session ID</div><div class="v">{{ taskDetail.session_id || '-' }}</div></div>
-              <div class="kv"><div class="k">Project / MR</div><div class="v">{{ taskDetail.project_id }} / !{{ taskDetail.mr_iid }}</div></div>
-              <div class="kv"><div class="k">Source</div><div class="v">{{ taskDetail.source }}</div></div>
-              <div class="kv"><div class="k">Status</div><div class="v">{{ taskDetail.status }}</div></div>
-              <div class="kv"><div class="k">Approve</div><div class="v">{{ taskDetail.approve === null ? '-' : taskDetail.approve }}</div></div>
-              <div class="kv"><div class="k">Created</div><div class="v">{{ taskDetail.created_at }}</div></div>
-              <div class="kv"><div class="k">Started</div><div class="v">{{ taskDetail.started_at || '-' }}</div></div>
-              <div class="kv"><div class="k">Finished</div><div class="v">{{ taskDetail.finished_at || '-' }}</div></div>
-              <div class="kv"><div class="k">Elapsed (s)</div><div class="v">{{ elapsedSeconds(taskDetail.started_at, taskDetail.finished_at) }}</div></div>
-              <div class="kv"><div class="k">Branches</div><div class="v">{{ taskDetail.source_branch }} -> {{ taskDetail.target_branch }}</div></div>
-              <div class="kv"><div class="k">Commit</div><div class="v">{{ taskDetail.commit_sha || '-' }}</div></div>
+              <div class="kv"><div class="k">{{ t('detail.taskId') }}</div><div class="v">{{ taskDetail.task_id }}</div></div>
+              <div class="kv"><div class="k">{{ t('detail.sessionId') }}</div><div class="v">{{ taskDetail.session_id || '-' }}</div></div>
+              <div class="kv"><div class="k">{{ t('detail.projectMr') }}</div><div class="v">{{ taskDetail.project_id }} / !{{ taskDetail.mr_iid }}</div></div>
+              <div class="kv"><div class="k">{{ t('detail.source') }}</div><div class="v">{{ taskDetail.source }}</div></div>
+              <div class="kv"><div class="k">{{ t('detail.status') }}</div><div class="v">{{ statusLabel(taskDetail.status) }}</div></div>
+              <div class="kv"><div class="k">{{ t('detail.approve') }}</div><div class="v">{{ taskDetail.approve === null ? '-' : taskDetail.approve }}</div></div>
+              <div class="kv"><div class="k">{{ t('detail.created') }}</div><div class="v">{{ taskDetail.created_at }}</div></div>
+              <div class="kv"><div class="k">{{ t('detail.started') }}</div><div class="v">{{ taskDetail.started_at || '-' }}</div></div>
+              <div class="kv"><div class="k">{{ t('detail.finished') }}</div><div class="v">{{ taskDetail.finished_at || '-' }}</div></div>
+              <div class="kv"><div class="k">{{ t('detail.elapsed') }}</div><div class="v">{{ elapsedSeconds(taskDetail) }}</div></div>
+              <div class="kv"><div class="k">{{ t('detail.branches') }}</div><div class="v">{{ taskDetail.source_branch }} -> {{ taskDetail.target_branch }}</div></div>
+              <div class="kv"><div class="k">{{ t('detail.commit') }}</div><div class="v">{{ taskDetail.commit_sha || '-' }}</div></div>
             </div>
 
             <div class="kv">
-              <div class="k">Summary</div>
+              <div class="k">{{ t('detail.summary') }}</div>
               <div class="v">{{ taskDetail.summary || '-' }}</div>
             </div>
 
             <div class="kv" v-if="taskDetail.error">
-              <div class="k">Error</div>
+              <div class="k">{{ t('detail.error') }}</div>
               <div class="v error-text">{{ taskDetail.error }}</div>
             </div>
 
             <div class="kv">
-              <div class="k">Markdown Summary</div>
+              <div class="k">{{ t('detail.markdownSummary') }}</div>
               <pre>{{ taskDetail.markdown_summary || '-' }}</pre>
             </div>
 
             <div class="kv">
-              <div class="k">Warnings</div>
+              <div class="k">{{ t('detail.warnings') }}</div>
               <pre>{{ pretty(taskDetail.warnings || []) }}</pre>
             </div>
 
             <details class="raw" v-if="taskDetail.raw_result">
-              <summary>Raw OCR Result (JSON)</summary>
+              <summary>{{ t('detail.rawResult') }}</summary>
               <pre class="raw-pre">{{ pretty(taskDetail.raw_result) }}</pre>
             </details>
           </div>
-          <div class="detail muted" v-else>Select one task from the list.</div>
-          <div v-if="detailError" class="err">{{ detailError }}</div>
-          <div v-if="copiedTip" class="muted copied-tip">{{ copiedTip }}</div>
+          <div class="detail muted" v-else>{{ t('detail.empty') }}</div>
+          <div v-if="detailError" class="err">{{ msgText(detailError) }}</div>
+          <div v-if="copiedTip" class="muted copied-tip">{{ msgText(copiedTip) }}</div>
         </article>
 
         <article class="card">
           <div class="section-title">
-            <span>Findings</span>
-            <span class="muted">{{ findingData.total || 0 }} total</span>
+            <span>{{ t('findings.title') }}</span>
+            <span class="muted">{{ t('findings.totalCount', { n: findingData.total || 0 }) }}</span>
           </div>
 
           <div class="toolbar toolbar-findings">
             <div class="field">
-              <label>Severity</label>
+              <label>{{ t('findings.severity') }}</label>
               <select v-model="findingFilters.severity" @change="loadFindings(1)">
-                <option value="">All</option>
-                <option value="critical">critical</option>
-                <option value="high">high</option>
-                <option value="medium">medium</option>
-                <option value="low">low</option>
+                <option value="">{{ t('common.all') }}</option>
+                <option v-for="sv in severityValues" :key="sv" :value="sv">{{ severityLabel(sv) }}</option>
               </select>
             </div>
             <div class="field">
-              <label>Category</label>
-              <input v-model.trim="findingFilters.category" @keyup.enter="loadFindings(1)" placeholder="category" />
+              <label>{{ t('findings.category') }}</label>
+              <input v-model.trim="findingFilters.category" @keyup.enter="loadFindings(1)" :placeholder="t('findings.categoryPh')" />
             </div>
             <div class="field">
-              <label>Path</label>
-              <input v-model.trim="findingFilters.path" @keyup.enter="loadFindings(1)" placeholder="file path" />
+              <label>{{ t('findings.path') }}</label>
+              <input v-model.trim="findingFilters.path" @keyup.enter="loadFindings(1)" :placeholder="t('findings.pathPh')" />
             </div>
             <div class="field">
-              <label>Actions</label>
-              <button class="ghost" @click="loadFindings(1)" :disabled="!selectedTaskId">Apply</button>
+              <label>{{ t('findings.actions') }}</label>
+              <button class="ghost" @click="loadFindings(1)" :disabled="!selectedTaskId">{{ t('findings.apply') }}</button>
             </div>
           </div>
 
@@ -316,31 +329,31 @@
             <div class="finding" v-for="f in findingData.items" :key="f.id">
               <div class="head">
                 <span class="badge" :class="'s-' + (taskDetail?.status || 'done')">#{{ f.position }}</span>
-                <span :class="'sev-' + (f.severity || 'low')">{{ f.severity || 'unknown' }}</span>
-                <span class="muted">{{ f.category || 'other' }}</span>
+                <span :class="'sev-' + (f.severity || 'low')">{{ severityLabel(f.severity) }}</span>
+                <span class="muted">{{ f.category || t('findings.other') }}</span>
                 <span class="path">{{ f.path }}:{{ f.start_line || f.end_line || '?' }}</span>
               </div>
               <div class="finding-content">{{ f.content }}</div>
               <div v-if="f.existing_code">
-                <div class="muted">Existing code</div>
+                <div class="muted">{{ t('findings.existingCode') }}</div>
                 <div class="code">{{ f.existing_code }}</div>
               </div>
               <div v-if="f.suggestion_code">
-                <div class="muted">Suggestion</div>
+                <div class="muted">{{ t('findings.suggestion') }}</div>
                 <div class="code">{{ f.suggestion_code }}</div>
               </div>
             </div>
-            <div class="muted" v-if="findingData.items.length === 0">No findings.</div>
+            <div class="muted" v-if="findingData.items.length === 0">{{ t('findings.empty') }}</div>
           </div>
 
           <div class="pager">
-            <div>Page {{ findingPage }} / {{ findingPages }}</div>
+            <div>{{ t('common.page', { cur: findingPage, total: findingPages }) }}</div>
             <div class="pager-actions">
-              <button class="ghost" :disabled="findingPage <= 1" @click="loadFindings(findingPage - 1)">Prev</button>
-              <button class="ghost" :disabled="findingPage >= findingPages" @click="loadFindings(findingPage + 1)">Next</button>
+              <button class="ghost" :disabled="findingPage <= 1" @click="loadFindings(findingPage - 1)">{{ t('common.prev') }}</button>
+              <button class="ghost" :disabled="findingPage >= findingPages" @click="loadFindings(findingPage + 1)">{{ t('common.next') }}</button>
             </div>
           </div>
-          <div v-if="findingError" class="err">{{ findingError }}</div>
+          <div v-if="findingError" class="err">{{ msgText(findingError) }}</div>
         </article>
       </section>
       </template>
@@ -348,50 +361,47 @@
       <template v-else-if="activeTab === 'projects'">
       <section class="card">
         <div class="section-title">
-          <span>项目清单</span>
+          <span>{{ t('projects.title') }}</span>
           <div class="section-actions">
-            <span class="muted">{{ projectData.total }} total</span>
-            <button class="ghost" @click="loadProjects(projectPage)">刷新</button>
-            <button @click="openProjectCreate">手动添加</button>
+            <span class="muted">{{ t('projects.totalCount', { n: projectData.total }) }}</span>
+            <button class="ghost" @click="loadProjects(projectPage)">{{ t('common.refresh') }}</button>
+            <button @click="openProjectCreate">{{ t('projects.addManual') }}</button>
           </div>
         </div>
-        <p class="muted config-hint">
-          审核任务到达时自动登记;也可手动添加。「配置」里可绑定推送通道、Git 令牌与打标签;
-          未绑定推送的项目回退全局 NOTIFY_* 环境变量配置,未绑定令牌的项目回退全局 GITLAB_TOKEN。
-        </p>
+        <p class="muted config-hint">{{ t('projects.hint') }}</p>
 
         <div class="toolbar">
           <div class="field">
-            <label>关键词</label>
-            <input v-model.trim="projectQuery" @keyup.enter="loadProjects(1)" placeholder="project id / url" />
+            <label>{{ t('projects.keyword') }}</label>
+            <input v-model.trim="projectQuery" @keyup.enter="loadProjects(1)" :placeholder="t('projects.keywordPh')" />
           </div>
           <div class="field">
-            <label>推送配置</label>
+            <label>{{ t('projects.channel') }}</label>
             <select v-model="projectChannelFilter" @change="loadProjects(1)">
-              <option value="">全部</option>
-              <option value="none">未绑定</option>
+              <option value="">{{ t('common.all') }}</option>
+              <option value="none">{{ t('projects.channelNone') }}</option>
               <option v-for="c in channels" :key="c.channel_id" :value="c.channel_id">{{ c.name }} ({{ typeLabel(c.type) }})</option>
             </select>
           </div>
           <div class="field" v-if="tags.length">
-            <label>标签(任一命中)</label>
+            <label>{{ t('projects.tagAny') }}</label>
             <div class="tag-filter-chips">
               <button
                 type="button"
                 class="tag-chip tag-toggle"
-                v-for="t in tags"
-                :key="t.tag_id"
-                :class="[tagColorClass(t.name), { selected: projectTagFilter.includes(t.tag_id) }]"
-                @click="toggleProjectTagFilter(t.tag_id)"
-              >{{ t.name }}</button>
-              <button v-if="projectTagFilter.length" type="button" class="ghost btn-sm" @click="clearProjectTagFilter">清除</button>
+                v-for="tg in tags"
+                :key="tg.tag_id"
+                :class="[tagColorClass(tg.name), { selected: projectTagFilter.includes(tg.tag_id) }]"
+                @click="toggleProjectTagFilter(tg.tag_id)"
+              >{{ tg.name }}</button>
+              <button v-if="projectTagFilter.length" type="button" class="ghost btn-sm" @click="clearProjectTagFilter">{{ t('projects.clear') }}</button>
             </div>
           </div>
           <div class="field">
-            <label>Actions</label>
+            <label>{{ t('projects.actions') }}</label>
             <div class="inline-actions">
-              <button @click="loadProjects(1)">Search</button>
-              <button class="ghost" @click="resetProjectFilters">Reset</button>
+              <button @click="loadProjects(1)">{{ t('common.search') }}</button>
+              <button class="ghost" @click="resetProjectFilters">{{ t('common.reset') }}</button>
             </div>
           </div>
         </div>
@@ -400,19 +410,19 @@
           <table class="tasks-table projects-table">
             <thead>
               <tr>
-                <th class="col-actions">操作</th>
-                <th class="col-project-name">Project</th>
-                <th>项目 URL</th>
-                <th class="col-project-tags">标签</th>
-                <th>推送配置</th>
-                <th>Git 令牌</th>
-                <th>更新时间</th>
+                <th class="col-actions">{{ t('projects.col.actions') }}</th>
+                <th class="col-project-name">{{ t('projects.col.project') }}</th>
+                <th>{{ t('projects.col.url') }}</th>
+                <th class="col-project-tags">{{ t('projects.col.tags') }}</th>
+                <th>{{ t('projects.col.channel') }}</th>
+                <th>{{ t('projects.col.token') }}</th>
+                <th>{{ t('projects.col.updatedAt') }}</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="p in projectData.items" :key="p.project_id">
                 <td class="config-actions">
-                  <button class="ghost btn-sm" @click="openProjectConfig(p)">配置</button>
+                  <button class="ghost btn-sm" @click="openProjectConfig(p)">{{ t('projects.config') }}</button>
                 </td>
                 <td class="col-project-name">
                   <div class="project-name">{{ projectName(p) }}</div>
@@ -427,58 +437,55 @@
                 </td>
                 <td>
                   <span v-if="p.channel">{{ p.channel.name }} ({{ typeLabel(p.channel.type) }})</span>
-                  <span v-else class="muted">未绑定(全局配置)</span>
+                  <span v-else class="muted">{{ t('projects.notBoundChannel') }}</span>
                 </td>
                 <td>
                   <span v-if="p.git_token">{{ p.git_token.name }}</span>
-                  <span v-else class="muted">未绑定(全局 GITLAB_TOKEN)</span>
+                  <span v-else class="muted">{{ t('projects.notBoundToken') }}</span>
                 </td>
                 <td>{{ compactTime(p.updated_at) }}</td>
               </tr>
               <tr v-if="projectData.items.length === 0">
-                <td colspan="7" class="muted">暂无项目。</td>
+                <td colspan="7" class="muted">{{ t('projects.empty') }}</td>
               </tr>
             </tbody>
           </table>
         </div>
 
         <div class="pager">
-          <div>Page {{ projectPage }} / {{ projectPages }}</div>
+          <div>{{ t('common.page', { cur: projectPage, total: projectPages }) }}</div>
           <div class="pager-actions">
-            <button class="ghost" :disabled="projectPage <= 1" @click="loadProjects(projectPage - 1)">Prev</button>
-            <button class="ghost" :disabled="projectPage >= projectPages" @click="loadProjects(projectPage + 1)">Next</button>
+            <button class="ghost" :disabled="projectPage <= 1" @click="loadProjects(projectPage - 1)">{{ t('common.prev') }}</button>
+            <button class="ghost" :disabled="projectPage >= projectPages" @click="loadProjects(projectPage + 1)">{{ t('common.next') }}</button>
           </div>
         </div>
-        <div v-if="projectBindError" class="err config-hint">{{ projectBindError }}</div>
+        <div v-if="projectBindError" class="err config-hint">{{ msgText(projectBindError) }}</div>
       </section>
       </template>
 
       <template v-else-if="activeTab === 'channels'">
       <section class="card">
         <div class="section-title">
-          <span>推送配置</span>
+          <span>{{ t('channels.title') }}</span>
           <div class="section-actions">
-            <span class="muted">{{ channels.length }} 项</span>
-            <button class="ghost" @click="loadChannels">刷新</button>
-            <button @click="startChannelCreate">新增推送配置</button>
+            <span class="muted">{{ t('channels.countUnit', { n: channels.length }) }}</span>
+            <button class="ghost" @click="loadChannels">{{ t('common.refresh') }}</button>
+            <button @click="startChannelCreate">{{ t('channels.add') }}</button>
           </div>
         </div>
-        <p class="muted config-hint">
-          维护可复用的群机器人 webhook(飞书 / 企业微信 / 钉钉),在「项目清单」的配置里绑定到项目。
-          URL 与加签密钥保存后仅展示尾 4 位;编辑时留空表示保持不变。
-        </p>
+        <p class="muted config-hint">{{ t('channels.hint') }}</p>
 
         <div class="table-wrap">
           <table class="tasks-table channels-table">
             <thead>
               <tr>
-                <th>名称</th>
-                <th>类型</th>
-                <th>Webhook URL</th>
-                <th>加签密钥</th>
-                <th>绑定项目数</th>
-                <th>更新时间</th>
-                <th>操作</th>
+                <th>{{ t('channels.col.name') }}</th>
+                <th>{{ t('channels.col.type') }}</th>
+                <th>{{ t('channels.col.webhook') }}</th>
+                <th>{{ t('channels.col.secret') }}</th>
+                <th>{{ t('channels.col.bound') }}</th>
+                <th>{{ t('channels.col.updatedAt') }}</th>
+                <th>{{ t('channels.col.actions') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -490,123 +497,119 @@
                 <td>{{ c.bound_project_count }}</td>
                 <td>{{ compactTime(c.updated_at) }}</td>
                 <td class="config-actions">
-                  <button class="ghost btn-sm" :disabled="channelTesting === c.channel_id" @click="testChannel(c)">{{ channelTesting === c.channel_id ? '发送中...' : '测试' }}</button>
-                  <button class="ghost btn-sm" @click="editChannel(c)">编辑</button>
-                  <button class="ghost btn-sm btn-danger" @click="askDeleteChannel(c)">删除</button>
+                  <button class="ghost btn-sm" :disabled="channelTesting === c.channel_id" @click="testChannel(c)">{{ channelTesting === c.channel_id ? t('common.sending') : t('common.test') }}</button>
+                  <button class="ghost btn-sm" @click="editChannel(c)">{{ t('common.edit') }}</button>
+                  <button class="ghost btn-sm btn-danger" @click="askDeleteChannel(c)">{{ t('common.delete') }}</button>
                 </td>
               </tr>
               <tr v-if="channels.length === 0">
-                <td colspan="7" class="muted">暂无推送配置。</td>
+                <td colspan="7" class="muted">{{ t('channels.empty') }}</td>
               </tr>
             </tbody>
           </table>
         </div>
         <div v-if="channelTestResult" class="muted copied-tip" :class="channelTestResult.ok ? 'ok' : 'err'">
-          {{ channelTestResult.ok ? '✅ 测试消息已发送' : '❌ ' + channelTestResult.error }}
+          {{ channelTestResult.ok ? t('channels.testOk') : '❌ ' + testErrorText(channelTestResult) }}
         </div>
-        <div v-if="channelError" class="err config-hint">{{ channelError }}</div>
+        <div v-if="channelError" class="err config-hint">{{ msgText(channelError) }}</div>
       </section>
       </template>
 
       <template v-else-if="activeTab === 'tokens'">
       <section class="card">
         <div class="section-title">
-          <span>Git 令牌</span>
+          <span>{{ t('tokens.title') }}</span>
           <div class="section-actions">
-            <span class="muted">{{ tokens.length }} 项</span>
-            <button class="ghost" @click="loadTokens">刷新</button>
-            <button @click="startTokenCreate">新增令牌</button>
+            <span class="muted">{{ t('tokens.countUnit', { n: tokens.length }) }}</span>
+            <button class="ghost" @click="loadTokens">{{ t('common.refresh') }}</button>
+            <button @click="startTokenCreate">{{ t('tokens.add') }}</button>
           </div>
         </div>
-        <p class="muted config-hint">
-          维护可复用的 GitLab 访问令牌(需 read_repository + api scope),在「项目清单」的配置里绑定到项目。
-          绑定后该项目的代码拉取与 MR 评论均使用此令牌,未绑定回退全局 GITLAB_TOKEN。
-          令牌保存后仅展示尾 4 位;编辑时留空表示保持不变。
-        </p>
+        <p class="muted config-hint">{{ t('tokens.hint') }}</p>
 
         <div class="table-wrap">
           <table class="tasks-table tokens-table">
             <thead>
               <tr>
-                <th>名称</th>
-                <th>Token</th>
-                <th>绑定项目数</th>
-                <th>更新时间</th>
-                <th>操作</th>
+                <th>{{ t('tokens.col.name') }}</th>
+                <th>{{ t('tokens.col.token') }}</th>
+                <th>{{ t('tokens.col.bound') }}</th>
+                <th>{{ t('tokens.col.updatedAt') }}</th>
+                <th>{{ t('tokens.col.actions') }}</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="t in tokens" :key="t.git_token_id">
-                <td>{{ t.name }}</td>
-                <td><span class="masked">{{ t.token_masked }}</span></td>
-                <td>{{ t.bound_project_count }}</td>
-                <td>{{ compactTime(t.updated_at) }}</td>
+              <tr v-for="tok in tokens" :key="tok.git_token_id">
+                <td>{{ tok.name }}</td>
+                <td><span class="masked">{{ tok.token_masked }}</span></td>
+                <td>{{ tok.bound_project_count }}</td>
+                <td>{{ compactTime(tok.updated_at) }}</td>
                 <td class="config-actions">
-                  <button class="ghost btn-sm" :disabled="tokenTesting === t.git_token_id" @click="testToken(t)">{{ tokenTesting === t.git_token_id ? '测试中...' : '测试' }}</button>
-                  <button class="ghost btn-sm" @click="editToken(t)">编辑</button>
-                  <button class="ghost btn-sm btn-danger" @click="askDeleteToken(t)">删除</button>
+                  <button class="ghost btn-sm" :disabled="tokenTesting === tok.git_token_id" @click="testToken(tok)">{{ tokenTesting === tok.git_token_id ? t('common.testing') : t('common.test') }}</button>
+                  <button class="ghost btn-sm" @click="editToken(tok)">{{ t('common.edit') }}</button>
+                  <button class="ghost btn-sm btn-danger" @click="askDeleteToken(tok)">{{ t('common.delete') }}</button>
                 </td>
               </tr>
               <tr v-if="tokens.length === 0">
-                <td colspan="5" class="muted">暂无 Git 令牌。</td>
+                <td colspan="5" class="muted">{{ t('tokens.empty') }}</td>
               </tr>
             </tbody>
           </table>
         </div>
         <div v-if="tokenTestResult" class="muted copied-tip" :class="tokenTestResult.ok ? 'ok' : 'err'">
-          {{ tokenTestResult.ok ? '✅ 令牌有效(' + tokenTestResult.username + ')' : '❌ ' + tokenTestResult.error }}
+          {{ tokenTestResult.ok ? t('tokens.testOk', { username: tokenTestResult.username }) : '❌ ' + testErrorText(tokenTestResult) }}
         </div>
-        <div v-if="tokenError" class="err config-hint">{{ tokenError }}</div>
+        <div v-if="tokenError" class="err config-hint">{{ msgText(tokenError) }}</div>
       </section>
       </template>
 
       <template v-else-if="activeTab === 'tags'">
       <section class="card">
         <div class="section-title">
-          <span>项目标签</span>
+          <span>{{ t('tags.title') }}</span>
           <div class="section-actions">
-            <span class="muted">{{ tags.length }} 个标签</span>
-            <button class="ghost" @click="loadTags">刷新</button>
-            <button @click="openTagCreate">添加标签</button>
+            <span class="muted">{{ t('tags.countUnit', { n: tags.length }) }}</span>
+            <button class="ghost" @click="loadTags">{{ t('common.refresh') }}</button>
+            <button @click="openTagCreate">{{ t('tags.add') }}</button>
           </div>
         </div>
-        <p class="muted config-hint">
-          标签在这里提前维护;在「项目清单」的配置里给项目打标签,清单与审核看板均可按标签筛选。
-        </p>
+        <p class="muted config-hint">{{ t('tags.hint') }}</p>
 
         <div class="tag-manage-list">
-          <div class="tag-manage-item" v-for="t in tags" :key="t.tag_id">
-            <span class="tag-chip" :class="tagColorClass(t.name)">{{ t.name }}</span>
-            <span class="muted tag-count">{{ t.project_count }} 个项目</span>
-            <button class="ghost btn-sm" @click="openTagRename(t)">重命名</button>
-            <button class="ghost btn-sm btn-danger" @click="askDeleteTag(t)">删除</button>
+          <div class="tag-manage-item" v-for="tg in tags" :key="tg.tag_id">
+            <span class="tag-chip" :class="tagColorClass(tg.name)">{{ tg.name }}</span>
+            <span class="muted tag-count">{{ tc('tags.projectCount', tg.project_count) }}</span>
+            <button class="ghost btn-sm" @click="openTagRename(tg)">{{ t('tags.rename') }}</button>
+            <button class="ghost btn-sm btn-danger" @click="askDeleteTag(tg)">{{ t('common.delete') }}</button>
           </div>
-          <div class="muted" v-if="tags.length === 0">暂无标签,点右上角「添加标签」创建。</div>
+          <div class="muted" v-if="tags.length === 0">{{ t('tags.empty') }}</div>
         </div>
-        <div v-if="tagError" class="err config-hint">{{ tagError }}</div>
+        <div v-if="tagError" class="err config-hint">{{ msgText(tagError) }}</div>
       </section>
       </template>
 
       <template v-else-if="activeTab === 'users'">
       <section class="card">
         <div class="section-title">
-          <span>Git 用户</span>
+          <span>{{ t('users.title') }}</span>
           <div class="section-actions">
-            <span class="muted">{{ users.length }} 人</span>
-            <button class="ghost" @click="loadUsers">刷新</button>
+            <span class="muted">{{ t('users.countUnit', { n: users.length }) }}</span>
+            <button class="ghost" @click="loadUsers">{{ t('common.refresh') }}</button>
           </div>
         </div>
-        <p class="muted config-hint">
-          用户在 MR webhook 到达时自动登记(提交人/处理人,尽力带出邮箱)。
-          「工号」在此维护:保存后飞书推送直接以工号艾特;留空则回退飞书用户映射表(open_id)艾特,
-          再回退 @GitLab用户名 文本。
-        </p>
+        <p class="muted config-hint">{{ t('users.hint') }}</p>
 
         <div class="table-wrap">
           <table class="tasks-table users-table">
             <thead>
               <tr>
-                <th>姓名</th><th>用户名</th><th>邮箱</th><th>工号</th><th>GitLab ID</th><th>更新时间</th><th>操作</th>
+                <th>{{ t('users.col.name') }}</th>
+                <th>{{ t('users.col.username') }}</th>
+                <th>{{ t('users.col.email') }}</th>
+                <th>{{ t('users.col.employeeNumber') }}</th>
+                <th>{{ t('users.col.gitlabId') }}</th>
+                <th>{{ t('users.col.updatedAt') }}</th>
+                <th>{{ t('users.col.actions') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -616,21 +619,21 @@
                 <td>{{ u.email || '-' }}</td>
                 <td>
                   <span v-if="u.employee_number">{{ u.employee_number }}</span>
-                  <span v-else class="muted">未维护</span>
+                  <span v-else class="muted">{{ t('users.notSet') }}</span>
                 </td>
                 <td class="muted">{{ u.user_id }}</td>
                 <td>{{ compactTime(u.updated_at) }}</td>
                 <td class="config-actions">
-                  <button class="ghost btn-sm" @click="openUserEdit(u)">编辑</button>
+                  <button class="ghost btn-sm" @click="openUserEdit(u)">{{ t('common.edit') }}</button>
                 </td>
               </tr>
               <tr v-if="users.length === 0">
-                <td colspan="7" class="muted">暂无用户,MR webhook 到达后自动登记。</td>
+                <td colspan="7" class="muted">{{ t('users.empty') }}</td>
               </tr>
             </tbody>
           </table>
         </div>
-        <div v-if="userError" class="err config-hint">{{ userError }}</div>
+        <div v-if="userError" class="err config-hint">{{ msgText(userError) }}</div>
       </section>
       </template>
     </main>
@@ -639,35 +642,35 @@
     <div class="modal-mask" v-if="channelForm.open" @click.self="cancelChannelForm">
       <div class="modal">
         <div class="modal-head">
-          <span>{{ channelForm.editingId ? '编辑推送配置' : '新增推送配置' }}</span>
-          <button class="ghost btn-sm" type="button" @click="cancelChannelForm">✕</button>
+          <span>{{ channelForm.editingId ? t('modal.channel.edit') : t('modal.channel.create') }}</span>
+          <button class="ghost btn-sm" type="button" :aria-label="t('common.close')" @click="cancelChannelForm">✕</button>
         </div>
         <form class="modal-body form-grid" @submit.prevent="submitChannel">
           <div class="field">
-            <label>名称 *</label>
-            <input v-model.trim="channelForm.name" placeholder="如:后端一组飞书群" maxlength="64" />
+            <label>{{ t('common.name') }} {{ t('common.required') }}</label>
+            <input v-model.trim="channelForm.name" :placeholder="t('modal.channel.namePh')" maxlength="64" />
           </div>
           <div class="field">
-            <label>类型 *</label>
+            <label>{{ t('common.type') }} {{ t('common.required') }}</label>
             <select v-model="channelForm.type">
-              <option value="feishu">飞书</option>
-              <option value="wechat">企业微信</option>
-              <option value="dingtalk">钉钉</option>
+              <option value="feishu">{{ t('channelType.feishu') }}</option>
+              <option value="wechat">{{ t('channelType.wechat') }}</option>
+              <option value="dingtalk">{{ t('channelType.dingtalk') }}</option>
             </select>
           </div>
           <div class="field field-span-2">
-            <label>Webhook URL {{ channelForm.editingId ? '(留空保持不变)' : '*' }}</label>
+            <label>{{ t('channels.col.webhook') }} {{ channelForm.editingId ? t('common.keepBlank') : t('common.required') }}</label>
             <input v-model.trim="channelForm.webhook_url" :placeholder="channelForm.editingId ? channelForm.urlMasked : 'https://open.feishu.cn/open-apis/bot/v2/hook/xxx'" />
           </div>
           <div class="field field-span-2">
-            <label>加签密钥 {{ channelForm.editingId ? '(留空保持不变)' : '(可选)' }}</label>
-            <input v-model.trim="channelForm.sign_secret" :placeholder="channelForm.editingId ? channelForm.secretMasked : '机器人安全设置里的加签密钥'" />
+            <label>{{ t('channels.col.secret') }} {{ channelForm.editingId ? t('common.keepBlank') : t('common.optional') }}</label>
+            <input v-model.trim="channelForm.sign_secret" :placeholder="channelForm.editingId ? channelForm.secretMasked : t('modal.channel.secretPh')" />
           </div>
-          <div v-if="channelError" class="err field-span-2">{{ channelError }}</div>
+          <div v-if="channelError" class="err field-span-2">{{ msgText(channelError) }}</div>
         </form>
         <div class="modal-foot">
-          <button class="ghost" type="button" @click="cancelChannelForm">取消</button>
-          <button type="submit" :disabled="channelSaving" @click="submitChannel">{{ channelForm.editingId ? '保存' : '创建' }}</button>
+          <button class="ghost" type="button" @click="cancelChannelForm">{{ t('common.cancel') }}</button>
+          <button type="submit" :disabled="channelSaving" @click="submitChannel">{{ channelForm.editingId ? t('common.save') : t('common.create') }}</button>
         </div>
       </div>
     </div>
@@ -676,28 +679,28 @@
     <div class="modal-mask" v-if="tokenForm.open" @click.self="cancelTokenForm">
       <div class="modal modal-sm">
         <div class="modal-head">
-          <span>{{ tokenForm.editingId ? '编辑 Git 令牌' : '新增 Git 令牌' }}</span>
-          <button class="ghost btn-sm" type="button" @click="cancelTokenForm">✕</button>
+          <span>{{ tokenForm.editingId ? t('modal.token.edit') : t('modal.token.create') }}</span>
+          <button class="ghost btn-sm" type="button" :aria-label="t('common.close')" @click="cancelTokenForm">✕</button>
         </div>
         <form class="modal-body" @submit.prevent="submitToken">
           <div class="field">
-            <label>名称 *</label>
-            <input v-model.trim="tokenForm.name" placeholder="如:某某项目组 token" maxlength="64" />
+            <label>{{ t('common.name') }} {{ t('common.required') }}</label>
+            <input v-model.trim="tokenForm.name" :placeholder="t('modal.token.namePh')" maxlength="64" />
           </div>
           <div class="field">
-            <label>Token {{ tokenForm.editingId ? '(留空保持不变)' : '*' }}</label>
+            <label>{{ t('tokens.col.token') }} {{ tokenForm.editingId ? t('common.keepBlank') : t('common.required') }}</label>
             <input
               v-model.trim="tokenForm.token"
               type="password"
               autocomplete="new-password"
-              :placeholder="tokenForm.editingId ? tokenForm.tokenMasked : 'glpat-… 或 Personal/Project Access Token'"
+              :placeholder="tokenForm.editingId ? tokenForm.tokenMasked : t('modal.token.tokenPh')"
             />
           </div>
-          <div v-if="tokenError" class="err">{{ tokenError }}</div>
+          <div v-if="tokenError" class="err">{{ msgText(tokenError) }}</div>
         </form>
         <div class="modal-foot">
-          <button class="ghost" type="button" @click="cancelTokenForm">取消</button>
-          <button type="submit" :disabled="tokenSaving" @click="submitToken">{{ tokenForm.editingId ? '保存' : '创建' }}</button>
+          <button class="ghost" type="button" @click="cancelTokenForm">{{ t('common.cancel') }}</button>
+          <button type="submit" :disabled="tokenSaving" @click="submitToken">{{ tokenForm.editingId ? t('common.save') : t('common.create') }}</button>
         </div>
       </div>
     </div>
@@ -706,19 +709,19 @@
     <div class="modal-mask" v-if="tagModal.open" @click.self="cancelTagModal">
       <div class="modal modal-sm">
         <div class="modal-head">
-          <span>{{ tagModal.editingId ? '重命名标签' : '添加标签' }}</span>
-          <button class="ghost btn-sm" type="button" @click="cancelTagModal">✕</button>
+          <span>{{ tagModal.editingId ? t('modal.tag.rename') : t('modal.tag.create') }}</span>
+          <button class="ghost btn-sm" type="button" :aria-label="t('common.close')" @click="cancelTagModal">✕</button>
         </div>
         <form class="modal-body" @submit.prevent="submitTagModal">
           <div class="field">
-            <label>标签名 *</label>
-            <input v-model.trim="tagModal.name" maxlength="32" placeholder="如:核心系统 / 支付 / 前端" />
+            <label>{{ t('modal.tag.name') }} {{ t('common.required') }}</label>
+            <input v-model.trim="tagModal.name" maxlength="32" :placeholder="t('modal.tag.namePh')" />
           </div>
-          <div v-if="tagError" class="err">{{ tagError }}</div>
+          <div v-if="tagError" class="err">{{ msgText(tagError) }}</div>
         </form>
         <div class="modal-foot">
-          <button class="ghost" type="button" @click="cancelTagModal">取消</button>
-          <button type="submit" :disabled="tagSaving" @click="submitTagModal">{{ tagModal.editingId ? '保存' : '添加' }}</button>
+          <button class="ghost" type="button" @click="cancelTagModal">{{ t('common.cancel') }}</button>
+          <button type="submit" :disabled="tagSaving" @click="submitTagModal">{{ tagModal.editingId ? t('common.save') : t('common.add') }}</button>
         </div>
       </div>
     </div>
@@ -727,19 +730,19 @@
     <div class="modal-mask" v-if="userModal.open" @click.self="cancelUserModal">
       <div class="modal modal-sm">
         <div class="modal-head">
-          <span>维护工号 - {{ userModal.username }}</span>
-          <button class="ghost btn-sm" type="button" @click="cancelUserModal">✕</button>
+          <span>{{ t('modal.user.title', { username: userModal.username }) }}</span>
+          <button class="ghost btn-sm" type="button" :aria-label="t('common.close')" @click="cancelUserModal">✕</button>
         </div>
         <form class="modal-body" @submit.prevent="submitUserModal">
           <div class="field">
-            <label>工号(留空 = 清空)</label>
-            <input v-model.trim="userModal.employeeNumber" maxlength="64" placeholder="如 E00123" />
+            <label>{{ t('modal.user.label') }}</label>
+            <input v-model.trim="userModal.employeeNumber" maxlength="64" :placeholder="t('modal.user.ph')" />
           </div>
-          <div v-if="userError" class="err">{{ userError }}</div>
+          <div v-if="userError" class="err">{{ msgText(userError) }}</div>
         </form>
         <div class="modal-foot">
-          <button class="ghost" type="button" @click="cancelUserModal">取消</button>
-          <button type="submit" :disabled="userSaving" @click="submitUserModal">保存</button>
+          <button class="ghost" type="button" @click="cancelUserModal">{{ t('common.cancel') }}</button>
+          <button type="submit" :disabled="userSaving" @click="submitUserModal">{{ t('common.save') }}</button>
         </div>
       </div>
     </div>
@@ -748,37 +751,37 @@
     <div class="modal-mask" v-if="projectCreateModal.open" @click.self="cancelProjectCreate">
       <div class="modal">
         <div class="modal-head">
-          <span>手动添加项目</span>
-          <button class="ghost btn-sm" type="button" @click="cancelProjectCreate">✕</button>
+          <span>{{ t('modal.project.create') }}</span>
+          <button class="ghost btn-sm" type="button" :aria-label="t('common.close')" @click="cancelProjectCreate">✕</button>
         </div>
         <form class="modal-body form-grid" @submit.prevent="submitProject">
           <div class="field">
-            <label>Project ID *</label>
-            <input v-model.trim="projectForm.project_id" placeholder="GitLab project id(数字)" />
+            <label>{{ t('modal.project.idLabel') }} {{ t('common.required') }}</label>
+            <input v-model.trim="projectForm.project_id" :placeholder="t('modal.project.idPh')" />
           </div>
           <div class="field">
-            <label>项目 URL(可选)</label>
+            <label>{{ t('modal.project.urlLabel') }}</label>
             <input v-model.trim="projectForm.project_url" placeholder="https://gitlab.example.com/group/repo" />
           </div>
           <div class="field field-span-2">
-            <label>绑定推送配置(可选)</label>
+            <label>{{ t('modal.project.bindChannel') }}</label>
             <select v-model="projectForm.channel_id">
-              <option value="">暂不绑定</option>
+              <option value="">{{ t('modal.project.notNow') }}</option>
               <option v-for="c in channels" :key="c.channel_id" :value="c.channel_id">{{ c.name }} ({{ typeLabel(c.type) }})</option>
             </select>
           </div>
           <div class="field field-span-2">
-            <label>绑定 Git 令牌(可选)</label>
+            <label>{{ t('modal.project.bindToken') }}</label>
             <select v-model="projectForm.git_token_id">
-              <option value="">暂不绑定</option>
-              <option v-for="t in tokens" :key="t.git_token_id" :value="t.git_token_id">{{ t.name }}</option>
+              <option value="">{{ t('modal.project.notNow') }}</option>
+              <option v-for="tok in tokens" :key="tok.git_token_id" :value="tok.git_token_id">{{ tok.name }}</option>
             </select>
           </div>
-          <div v-if="projectError" class="err field-span-2">{{ projectError }}</div>
+          <div v-if="projectError" class="err field-span-2">{{ msgText(projectError) }}</div>
         </form>
         <div class="modal-foot">
-          <button class="ghost" type="button" @click="cancelProjectCreate">取消</button>
-          <button type="submit" :disabled="projectSaving" @click="submitProject">添加</button>
+          <button class="ghost" type="button" @click="cancelProjectCreate">{{ t('common.cancel') }}</button>
+          <button type="submit" :disabled="projectSaving" @click="submitProject">{{ t('common.add') }}</button>
         </div>
       </div>
     </div>
@@ -787,63 +790,64 @@
     <div class="modal-mask" v-if="projectConfigModal.open" @click.self="cancelProjectConfig">
       <div class="modal">
         <div class="modal-head">
-          <span>项目配置 - {{ projectConfigModal.projectId }}</span>
-          <button class="ghost btn-sm" type="button" @click="cancelProjectConfig">✕</button>
+          <span>{{ t('modal.project.configTitle', { projectId: projectConfigModal.projectId }) }}</span>
+          <button class="ghost btn-sm" type="button" :aria-label="t('common.close')" @click="cancelProjectConfig">✕</button>
         </div>
         <div class="modal-body">
           <div class="field">
-            <label>推送配置</label>
+            <label>{{ t('projects.col.channel') }}</label>
             <select v-model="projectConfigModal.channelId">
-              <option value="">未绑定(使用全局配置)</option>
+              <option value="">{{ t('modal.project.channelUnbound') }}</option>
               <option v-for="c in channels" :key="c.channel_id" :value="c.channel_id">{{ c.name }} ({{ typeLabel(c.type) }})</option>
             </select>
           </div>
           <div class="field">
-            <label>Git 令牌</label>
+            <label>{{ t('projects.col.token') }}</label>
             <select v-model="projectConfigModal.tokenId">
-              <option value="">未绑定(使用全局 GITLAB_TOKEN)</option>
-              <option v-for="t in tokens" :key="t.git_token_id" :value="t.git_token_id">{{ t.name }}</option>
+              <option value="">{{ t('modal.project.tokenUnbound') }}</option>
+              <option v-for="tok in tokens" :key="tok.git_token_id" :value="tok.git_token_id">{{ tok.name }}</option>
             </select>
           </div>
           <div class="field" v-if="tags.length">
-            <label>标签(可多选)</label>
+            <label>{{ t('modal.project.tagsMulti') }}</label>
             <div class="tag-filter-chips">
               <button
                 type="button"
                 class="tag-chip tag-toggle"
-                v-for="t in tags"
-                :key="t.tag_id"
-                :class="[tagColorClass(t.name), { selected: projectConfigModal.tagSelection.includes(t.tag_id) }]"
-                @click="toggleConfigTagSelection(t.tag_id)"
-              >{{ t.name }}</button>
+                v-for="tg in tags"
+                :key="tg.tag_id"
+                :class="[tagColorClass(tg.name), { selected: projectConfigModal.tagSelection.includes(tg.tag_id) }]"
+                @click="toggleConfigTagSelection(tg.tag_id)"
+              >{{ tg.name }}</button>
             </div>
           </div>
           <div class="field" v-else>
-            <label>标签</label>
-            <span class="muted">暂无标签可选,请先在「项目标签」页维护。</span>
+            <label>{{ t('modal.project.tags') }}</label>
+            <span class="muted">{{ t('modal.project.noTags') }}</span>
           </div>
         </div>
         <div class="modal-foot">
-          <button class="ghost" type="button" @click="cancelProjectConfig">取消</button>
-          <button :disabled="projectConfigSaving" @click="saveProjectConfig">{{ projectConfigSaving ? '保存中...' : '保存' }}</button>
+          <button class="ghost" type="button" @click="cancelProjectConfig">{{ t('common.cancel') }}</button>
+          <button :disabled="projectConfigSaving" @click="saveProjectConfig">{{ projectConfigSaving ? t('common.saving') : t('common.save') }}</button>
         </div>
-        <div v-if="projectBindError" class="err modal-error">{{ projectBindError }}</div>
+        <div v-if="projectBindError" class="err modal-error">{{ msgText(projectBindError) }}</div>
       </div>
     </div>
 
     <!-- ── 模态框:通用确认 ───────────────────────────────── -->
+    <!-- 存翻译键而非成串文本:弹窗开着时切语言,标题/正文/按钮都会跟着变 -->
     <div class="modal-mask" v-if="confirmModal.open" @click.self="closeConfirm">
       <div class="modal modal-sm">
         <div class="modal-head">
-          <span>{{ confirmModal.title }}</span>
-          <button class="ghost btn-sm" type="button" @click="closeConfirm">✕</button>
+          <span>{{ t(confirmModal.titleKey, confirmModal.params) }}</span>
+          <button class="ghost btn-sm" type="button" :aria-label="t('common.close')" @click="closeConfirm">✕</button>
         </div>
         <div class="modal-body">
-          <p class="confirm-text">{{ confirmModal.message }}</p>
+          <p class="confirm-text">{{ confirmMessage() }}</p>
         </div>
         <div class="modal-foot">
-          <button class="ghost" type="button" @click="closeConfirm">取消</button>
-          <button class="danger" :disabled="confirmModal.loading" @click="confirmModalAction">{{ confirmModal.loading ? '处理中...' : (confirmModal.confirmText || '确定') }}</button>
+          <button class="ghost" type="button" @click="closeConfirm">{{ t('common.cancel') }}</button>
+          <button class="danger" :disabled="confirmModal.loading" @click="confirmModalAction">{{ confirmModal.loading ? t('common.processing') : t(confirmModal.confirmKey || 'common.confirm') }}</button>
         </div>
       </div>
     </div>

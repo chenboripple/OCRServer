@@ -30,7 +30,16 @@ router = APIRouter()
 
 _CONSOLE_HTML = Path(__file__).resolve().parents[1] / "static" / "console" / "console.html"
 _CONSOLE_ASSET_DIR = _CONSOLE_HTML.parent
-_CONSOLE_ALLOWED_ASSETS = {"console.css", "console.js"}
+_CONSOLE_ALLOWED_ASSETS = {"console.css", "console.js", "i18n.js"}
+
+
+def _err(code: str, status: int = 409, **params) -> HTTPException:
+    """机器可读的错误响应。
+
+    detail 是对象而非成串中文:控制台要按语言渲染,只能拿 code 去 i18n.js 的 apierr.* 查文案,
+    params 代入占位符(如 {name})。新增 code 必须同步补两份词典,否则前端回落到原文。
+    """
+    return HTTPException(status_code=status, detail={"code": code, **params})
 
 
 @router.get("/console", include_in_schema=False)
@@ -82,7 +91,7 @@ def list_tasks(
 def task_detail(task_id: str):
     detail = storage.console_repo.get_task_detail(task_id)
     if not detail:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise _err("task_not_found", status=404)
     return detail
 
 
@@ -97,7 +106,7 @@ def task_findings(
 ):
     task = storage.get_task(task_id)
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise _err("task_not_found", status=404)
     return storage.console_repo.list_findings(
         task_id,
         page=page,
@@ -169,7 +178,7 @@ def list_channels():
 def create_channel(body: ChannelCreate):
     existing = storage.channel_repo.get_by_name(body.name)
     if existing:
-        raise HTTPException(status_code=409, detail=f"同名推送配置已存在: {body.name}")
+        raise _err("duplicate_channel_name", name=body.name)
     channel = storage.channel_repo.create(
         name=body.name, type=body.type,
         webhook_url=body.webhook_url, sign_secret=body.sign_secret,
@@ -181,10 +190,10 @@ def create_channel(body: ChannelCreate):
 def update_channel(channel_id: str, body: ChannelUpdate):
     existing = storage.channel_repo.get(channel_id)
     if not existing:
-        raise HTTPException(status_code=404, detail="Channel not found")
+        raise _err("channel_not_found", status=404)
     name_owner = storage.channel_repo.get_by_name(body.name)
     if name_owner and name_owner.channel_id != channel_id:
-        raise HTTPException(status_code=409, detail=f"同名推送配置已存在: {body.name}")
+        raise _err("duplicate_channel_name", name=body.name)
     # webhook_url / sign_secret 为 None(留空)时仓储保持原值
     channel = storage.channel_repo.update(
         channel_id,
@@ -192,14 +201,14 @@ def update_channel(channel_id: str, body: ChannelUpdate):
         webhook_url=body.webhook_url, sign_secret=body.sign_secret,
     )
     if not channel:
-        raise HTTPException(status_code=404, detail="Channel not found")
+        raise _err("channel_not_found", status=404)
     return _channel_payload(channel, storage.channel_repo.bound_project_count(channel_id))
 
 
 @router.delete("/api/console/channels/{channel_id}", status_code=204)
 def delete_channel(channel_id: str):
     if not storage.channel_repo.get(channel_id):
-        raise HTTPException(status_code=404, detail="Channel not found")
+        raise _err("channel_not_found", status=404)
     # 绑定该项目的外键 ON DELETE SET NULL 自动解绑(项目回退全局配置)
     storage.channel_repo.delete(channel_id)
 
@@ -209,7 +218,7 @@ def test_channel(channel_id: str):
     """用服务端存储的 url/secret 发一条测试消息,凭据不经页面。"""
     channel = storage.channel_repo.get(channel_id)
     if not channel:
-        raise HTTPException(status_code=404, detail="Channel not found")
+        raise _err("channel_not_found", status=404)
     error = notifier.send_test_message({
         "type": channel.type,
         "webhook_url": channel.webhook_url,
@@ -246,7 +255,7 @@ def list_tokens():
 def create_token(body: GitTokenCreate):
     existing = storage.token_repo.get_by_name(body.name)
     if existing:
-        raise HTTPException(status_code=409, detail=f"同名 Git 令牌已存在: {body.name}")
+        raise _err("duplicate_token_name", name=body.name)
     token_obj = storage.token_repo.create(name=body.name, token=body.token)
     return _git_token_payload(token_obj, 0)
 
@@ -255,22 +264,22 @@ def create_token(body: GitTokenCreate):
 def update_token(git_token_id: str, body: GitTokenUpdate):
     existing = storage.token_repo.get(git_token_id)
     if not existing:
-        raise HTTPException(status_code=404, detail="Git token not found")
+        raise _err("token_not_found", status=404)
     if body.name != existing.name:
         name_owner = storage.token_repo.get_by_name(body.name)
         if name_owner and name_owner.git_token_id != git_token_id:
-            raise HTTPException(status_code=409, detail=f"同名 Git 令牌已存在: {body.name}")
+            raise _err("duplicate_token_name", name=body.name)
     # token 为 None(留空)时仓储保持原值
     token_obj = storage.token_repo.update(git_token_id, name=body.name, token=body.token)
     if not token_obj:
-        raise HTTPException(status_code=404, detail="Git token not found")
+        raise _err("token_not_found", status=404)
     return _git_token_payload(token_obj, storage.token_repo.bound_project_count(git_token_id))
 
 
 @router.delete("/api/console/tokens/{git_token_id}", status_code=204)
 def delete_token(git_token_id: str):
     if not storage.token_repo.get(git_token_id):
-        raise HTTPException(status_code=404, detail="Git token not found")
+        raise _err("token_not_found", status=404)
     # 绑定该项目的外键 ON DELETE SET NULL 自动解绑(项目回退全局 GITLAB_TOKEN)
     storage.token_repo.delete(git_token_id)
 
@@ -280,9 +289,10 @@ def test_token(git_token_id: str):
     """用服务端存储的令牌调一次 GitLab /user,凭据不经页面。"""
     token_obj = storage.token_repo.get(git_token_id)
     if not token_obj:
-        raise HTTPException(status_code=404, detail="Git token not found")
+        raise _err("token_not_found", status=404)
     if not config.GITLAB_URL:
-        return {"ok": False, "error": "GITLAB_URL 未配置"}
+        # error 字段保留原文以兼容既有调用方;前端优先按 error_code 取本地化文案
+        return {"ok": False, "error_code": "gitlab_url_missing", "error": "GITLAB_URL is not configured"}
     try:
         gl = GitLabClient(config.GITLAB_URL, token_obj.token)
         user = gl.get_current_user()
@@ -314,7 +324,7 @@ def list_tags():
 @router.post("/api/console/tags", status_code=201)
 def create_tag(body: TagCreate):
     if storage.tag_repo.get_by_name(body.name):
-        raise HTTPException(status_code=409, detail=f"同名标签已存在: {body.name}")
+        raise _err("duplicate_tag_name", name=body.name)
     tag = storage.tag_repo.create(name=body.name)
     return _tag_payload(tag, 0)
 
@@ -323,21 +333,21 @@ def create_tag(body: TagCreate):
 def update_tag(tag_id: str, body: TagUpdate):
     existing = storage.tag_repo.get(tag_id)
     if not existing:
-        raise HTTPException(status_code=404, detail="Tag not found")
+        raise _err("tag_not_found", status=404)
     if body.name != existing.name:
         name_owner = storage.tag_repo.get_by_name(body.name)
         if name_owner and name_owner.tag_id != tag_id:
-            raise HTTPException(status_code=409, detail=f"同名标签已存在: {body.name}")
+            raise _err("duplicate_tag_name", name=body.name)
     tag = storage.tag_repo.rename(tag_id, name=body.name)
     if not tag:
-        raise HTTPException(status_code=404, detail="Tag not found")
+        raise _err("tag_not_found", status=404)
     return _tag_payload(tag, storage.tag_repo.project_count(tag_id))
 
 
 @router.delete("/api/console/tags/{tag_id}", status_code=204)
 def delete_tag(tag_id: str):
     if not storage.tag_repo.get(tag_id):
-        raise HTTPException(status_code=404, detail="Tag not found")
+        raise _err("tag_not_found", status=404)
     # 项目绑定关系由外键 ON DELETE CASCADE 自动清除
     storage.tag_repo.delete(tag_id)
 
@@ -367,7 +377,7 @@ def list_users():
 def update_user(user_id: str, body: GitUserUpdate):
     user = storage.user_repo.update_employee_number(user_id, employee_number=body.employee_number)
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise _err("user_not_found", status=404)
     return _git_user_payload(user)
 
 
@@ -387,9 +397,9 @@ def list_projects(
 @router.post("/api/console/projects", status_code=201)
 def create_project(body: ProjectCreate):
     if body.channel_id and not storage.channel_repo.get(body.channel_id):
-        raise HTTPException(status_code=404, detail="Channel not found")
+        raise _err("channel_not_found", status=404)
     if body.git_token_id and not storage.token_repo.get(body.git_token_id):
-        raise HTTPException(status_code=404, detail="Git token not found")
+        raise _err("token_not_found", status=404)
     # 幂等:重复添加只刷新 project_url;显式传了 channel_id/git_token_id 才覆盖绑定
     existing = storage.project_repo.get(body.project_id)
     storage.project_repo.upsert(body.project_id, body.project_url)
@@ -404,7 +414,7 @@ def _project_row(project_id: str) -> dict:
     """取项目单行(带绑定通道/令牌与标签);不存在抛 404。"""
     project = storage.project_repo.get(project_id)
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise _err("project_not_found", status=404)
     channel = None
     if project.channel_id:
         c = storage.channel_repo.get(project.channel_id)
@@ -431,9 +441,9 @@ def _project_row(project_id: str) -> dict:
 def bind_project_token(project_id: str, body: GitTokenBind):
     project = storage.project_repo.get(project_id)
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise _err("project_not_found", status=404)
     if body.git_token_id and not storage.token_repo.get(body.git_token_id):
-        raise HTTPException(status_code=404, detail="Git token not found")
+        raise _err("token_not_found", status=404)
     try:
         storage.project_repo.bind_token(project_id, body.git_token_id)
     except ValueError as e:
@@ -445,9 +455,9 @@ def bind_project_token(project_id: str, body: GitTokenBind):
 def bind_project(project_id: str, body: ProjectBind):
     project = storage.project_repo.get(project_id)
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise _err("project_not_found", status=404)
     if body.channel_id and not storage.channel_repo.get(body.channel_id):
-        raise HTTPException(status_code=404, detail="Channel not found")
+        raise _err("channel_not_found", status=404)
     try:
         storage.project_repo.bind(project_id, body.channel_id)
     except ValueError as e:
@@ -459,7 +469,7 @@ def bind_project(project_id: str, body: ProjectBind):
 def set_project_tags(project_id: str, body: ProjectTagsSet):
     """整体设置项目标签(全量替换);只能引用已维护的标签。"""
     if not storage.project_repo.get(project_id):
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise _err("project_not_found", status=404)
     try:
         storage.tag_repo.set_project_tags(project_id, body.tag_ids)
     except ValueError as e:

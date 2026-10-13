@@ -3,6 +3,16 @@ const { createApp } = Vue;
 createApp({
   data() {
     return {
+      // 界面语言。detectLang() 已按 ?lang= → localStorage → 浏览器语言 解析完毕,
+      // 早于 mounted() 里任何 loader,所以 applyStateFromUrl 不需要再管它。
+      lang: OcrI18n.detectLang(),
+      // 浏览器语言单独留一份:判断 lang 是否为「非默认值」,决定要不要写进 URL。
+      // 不能每次重算 —— URL 里已有 ?lang= 时会漂移。
+      browserLang: OcrI18n.detectBrowserLang(),
+      // 下拉枚举值取自 i18n 词表,与 statusLabel()/severityLabel() 共用一份,避免两处漂移。
+      // 提交给 API 的始终是英文枚举,只有可见文字随语言变化。
+      statusValues: OcrI18n.STATUS_VALUES,
+      severityValues: OcrI18n.SEVERITY_VALUES,
       activeTab: "review",
       lastRefreshAt: null,
       dashboardDays: 14,
@@ -24,10 +34,10 @@ createApp({
       taskData: { items: [], total: 0, page: 1, page_size: 20 },
       taskPage: 1,
       taskPageSize: 20,
-      taskError: "",
+      taskError: null,
       selectedTaskId: "",
       taskDetail: null,
-      detailError: "",
+      detailError: null,
       findingFilters: {
         severity: "",
         category: "",
@@ -36,34 +46,34 @@ createApp({
       findingData: { items: [], total: 0, page: 1, page_size: 50 },
       findingPage: 1,
       findingPageSize: 50,
-      findingError: "",
-      copiedTip: "",
+      findingError: null,
+      copiedTip: null,
       hoverTooltip: null,
       timer: null,
       // ── 配置页:推送配置 ──
       channels: [],
       channelForm: { open: false, editingId: "", name: "", type: "feishu", webhook_url: "", sign_secret: "", urlMasked: "", secretMasked: "" },
-      channelError: "",
+      channelError: null,
       channelSaving: false,
       channelTesting: "",
       channelTestResult: null,
       // ── 配置页:Git 令牌 ──
       tokens: [],
       tokenForm: { open: false, editingId: "", name: "", token: "", tokenMasked: "" },
-      tokenError: "",
+      tokenError: null,
       tokenSaving: false,
       tokenTesting: "",
       tokenTestResult: null,
       // ── 配置页:项目标签 ──
       tags: [],
       tagSaving: false,
-      tagError: "",
+      tagError: null,
       tagModal: { open: false, editingId: "", name: "" },
       // ── 配置页:Git 用户 ──
       users: [],
       userModal: { open: false, editingId: "", username: "", employeeNumber: "" },
       userSaving: false,
-      userError: "",
+      userError: null,
       // ── 配置页:项目清单 ──
       projectData: { items: [], total: 0, page: 1, page_size: 50 },
       projectPage: 1,
@@ -75,11 +85,12 @@ createApp({
       projectConfigModal: { open: false, projectId: "", channelId: "", tokenId: "", tagSelection: [] },
       projectConfigSaving: false,
       projectForm: { project_id: "", project_url: "", channel_id: "", git_token_id: "" },
-      projectError: "",
+      projectError: null,
       projectSaving: false,
-      projectBindError: "",
+      projectBindError: null,
       // ── 通用确认模态框 ──
-      confirmModal: { open: false, title: "", message: "", confirmText: "", loading: false, action: null }
+      // 存翻译键而非成串文本:弹窗开着时切语言才能跟着变。
+      confirmModal: { open: false, titleKey: "", messageKey: "", params: null, noteKey: "", noteParams: null, confirmKey: "", loading: false, action: null }
     };
   },
   computed: {
@@ -91,6 +102,22 @@ createApp({
     },
     projectPages() {
       return Math.max(1, Math.ceil((this.projectData.total || 0) / this.projectPageSize));
+    }
+  },
+  created() {
+    // data() 初始化不会触发 watch,首屏的 <html lang> 与 <title> 要在这里落一次。
+    this.applyLang(this.lang);
+  },
+  watch: {
+    lang(value) {
+      this.applyLang(value);
+      // 语言是视图偏好,不进 URL —— 否则 applyFilters/reloadAll/selectTask 每次触发
+      // syncStateToUrl 都会把它写进地址栏。
+      try {
+        window.localStorage.setItem(OcrI18n.STORAGE_KEY, value);
+      } catch (_) {
+        // 隐私模式下 localStorage 可能不可用,忽略即可
+      }
     }
   },
   mounted() {
@@ -134,11 +161,11 @@ createApp({
         const data = await resp.json();
         this.channels = data.items || [];
       } catch (e) {
-        this.channelError = `加载推送配置失败: ${String(e)}`;
+        this.channelError = this.msg("err.loadChannels", { e: String(e) });
       }
     },
     async loadProjects(page = 1) {
-      this.projectBindError = "";
+      this.projectBindError = null;
       this.projectPage = page;
       try {
         const params = new URLSearchParams();
@@ -159,12 +186,12 @@ createApp({
         }
         this.projectData = await resp.json();
       } catch (e) {
-        this.projectBindError = `加载项目清单失败: ${String(e)}`;
+        this.projectBindError = this.msg("err.loadProjects", { e: String(e) });
       }
     },
     startChannelCreate() {
       this.channelForm = { open: true, editingId: "", name: "", type: "feishu", webhook_url: "", sign_secret: "", urlMasked: "", secretMasked: "" };
-      this.channelError = "";
+      this.channelError = null;
     },
     editChannel(c) {
       this.channelForm = {
@@ -177,21 +204,21 @@ createApp({
         urlMasked: c.webhook_url_masked,
         secretMasked: c.sign_secret_masked
       };
-      this.channelError = "";
+      this.channelError = null;
     },
     cancelChannelForm() {
       this.channelForm = { open: false, editingId: "", name: "", type: "feishu", webhook_url: "", sign_secret: "", urlMasked: "", secretMasked: "" };
-      this.channelError = "";
+      this.channelError = null;
     },
     async submitChannel() {
-      this.channelError = "";
+      this.channelError = null;
       const form = this.channelForm;
       if (!form.name || !form.type) {
-        this.channelError = "名称与类型必填";
+        this.channelError = this.msg("val.nameTypeRequired");
         return;
       }
       if (!form.editingId && !form.webhook_url) {
-        this.channelError = "Webhook URL 必填";
+        this.channelError = this.msg("val.webhookRequired");
         return;
       }
       const payload = { name: form.name, type: form.type };
@@ -216,29 +243,36 @@ createApp({
               body: JSON.stringify(payload)
             });
         if (!resp.ok) {
-          const detail = await resp.json().catch(() => ({}));
-          throw new Error(detail.detail || `HTTP ${resp.status}`);
+          throw await this.readError(resp);
         }
         this.cancelChannelForm();
         await this.loadChannels();
       } catch (e) {
-        this.channelError = `保存失败: ${String(e)}`;
+        this.channelError = this.fail("err.save", e);
       } finally {
         this.channelSaving = false;
       }
     },
     askDeleteChannel(c) {
-      const bound = c.bound_project_count > 0 ? `删除后 ${c.bound_project_count} 个绑定项目将回退全局配置。` : "";
-      this.askConfirm("删除推送配置", `确定删除「${c.name}」?${bound}`, "删除", async () => {
-        try {
-          const resp = await fetch(this.apiUrl(`/api/console/channels/${encodeURIComponent(c.channel_id)}`), { method: "DELETE" });
-          if (!resp.ok) {
-            throw new Error(`HTTP ${resp.status}`);
+      const n = c.bound_project_count || 0;
+      this.askConfirm({
+        titleKey: "confirm.deleteChannel.title",
+        messageKey: "confirm.deleteChannel.message",
+        params: { name: c.name },
+        noteKey: n > 0 ? "confirm.deleteChannel.bound" : "",
+        noteParams: { n },
+        confirmKey: "common.delete",
+        action: async () => {
+          try {
+            const resp = await fetch(this.apiUrl(`/api/console/channels/${encodeURIComponent(c.channel_id)}`), { method: "DELETE" });
+            if (!resp.ok) {
+              throw await this.readError(resp);
+            }
+            await this.loadChannels();
+            await this.loadProjects(this.projectPage);
+          } catch (e) {
+            this.channelError = this.fail("err.del", e);
           }
-          await this.loadChannels();
-          await this.loadProjects(this.projectPage);
-        } catch (e) {
-          this.channelError = `删除失败: ${String(e)}`;
         }
       });
     },
@@ -270,12 +304,12 @@ createApp({
         const data = await resp.json();
         this.tokens = data.items || [];
       } catch (e) {
-        this.tokenError = `加载 Git 令牌失败: ${String(e)}`;
+        this.tokenError = this.msg("err.loadTokens", { e: String(e) });
       }
     },
     startTokenCreate() {
       this.tokenForm = { open: true, editingId: "", name: "", token: "", tokenMasked: "" };
-      this.tokenError = "";
+      this.tokenError = null;
     },
     editToken(t) {
       this.tokenForm = {
@@ -285,21 +319,21 @@ createApp({
         token: "",
         tokenMasked: t.token_masked
       };
-      this.tokenError = "";
+      this.tokenError = null;
     },
     cancelTokenForm() {
       this.tokenForm = { open: false, editingId: "", name: "", token: "", tokenMasked: "" };
-      this.tokenError = "";
+      this.tokenError = null;
     },
     async submitToken() {
-      this.tokenError = "";
+      this.tokenError = null;
       const form = this.tokenForm;
       if (!form.name) {
-        this.tokenError = "名称必填";
+        this.tokenError = this.msg("val.nameRequired");
         return;
       }
       if (!form.editingId && !form.token) {
-        this.tokenError = "Token 必填";
+        this.tokenError = this.msg("val.tokenRequired");
         return;
       }
       const payload = { name: form.name };
@@ -321,29 +355,36 @@ createApp({
               body: JSON.stringify(payload)
             });
         if (!resp.ok) {
-          const detail = await resp.json().catch(() => ({}));
-          throw new Error(detail.detail || `HTTP ${resp.status}`);
+          throw await this.readError(resp);
         }
         this.cancelTokenForm();
         await this.loadTokens();
       } catch (e) {
-        this.tokenError = `保存失败: ${String(e)}`;
+        this.tokenError = this.fail("err.save", e);
       } finally {
         this.tokenSaving = false;
       }
     },
-    askDeleteToken(t) {
-      const bound = t.bound_project_count > 0 ? `删除后 ${t.bound_project_count} 个绑定项目将回退全局 GITLAB_TOKEN。` : "";
-      this.askConfirm("删除 Git 令牌", `确定删除「${t.name}」?${bound}`, "删除", async () => {
-        try {
-          const resp = await fetch(this.apiUrl(`/api/console/tokens/${encodeURIComponent(t.git_token_id)}`), { method: "DELETE" });
-          if (!resp.ok) {
-            throw new Error(`HTTP ${resp.status}`);
+    askDeleteToken(tok) {
+      const n = tok.bound_project_count || 0;
+      this.askConfirm({
+        titleKey: "confirm.deleteToken.title",
+        messageKey: "confirm.deleteToken.message",
+        params: { name: tok.name },
+        noteKey: n > 0 ? "confirm.deleteToken.bound" : "",
+        noteParams: { n },
+        confirmKey: "common.delete",
+        action: async () => {
+          try {
+            const resp = await fetch(this.apiUrl(`/api/console/tokens/${encodeURIComponent(tok.git_token_id)}`), { method: "DELETE" });
+            if (!resp.ok) {
+              throw await this.readError(resp);
+            }
+            await this.loadTokens();
+            await this.loadProjects(this.projectPage);
+          } catch (e) {
+            this.tokenError = this.fail("err.del", e);
           }
-          await this.loadTokens();
-          await this.loadProjects(this.projectPage);
-        } catch (e) {
-          this.tokenError = `删除失败: ${String(e)}`;
         }
       });
     },
@@ -375,25 +416,25 @@ createApp({
         const data = await resp.json();
         this.tags = data.items || [];
       } catch (e) {
-        this.tagError = `加载标签失败: ${String(e)}`;
+        this.tagError = this.msg("err.loadTags", { e: String(e) });
       }
     },
     openTagCreate() {
       this.tagModal = { open: true, editingId: "", name: "" };
-      this.tagError = "";
+      this.tagError = null;
     },
     openTagRename(t) {
       this.tagModal = { open: true, editingId: t.tag_id, name: t.name };
-      this.tagError = "";
+      this.tagError = null;
     },
     cancelTagModal() {
       this.tagModal = { open: false, editingId: "", name: "" };
-      this.tagError = "";
+      this.tagError = null;
     },
     async submitTagModal() {
-      this.tagError = "";
+      this.tagError = null;
       if (!this.tagModal.name) {
-        this.tagError = "标签名必填";
+        this.tagError = this.msg("val.tagNameRequired");
         return;
       }
       this.tagSaving = true;
@@ -411,33 +452,40 @@ createApp({
               body: JSON.stringify({ name: this.tagModal.name })
             });
         if (!resp.ok) {
-          const detail = await resp.json().catch(() => ({}));
-          throw new Error(detail.detail || `HTTP ${resp.status}`);
+          throw await this.readError(resp);
         }
         this.cancelTagModal();
         await this.loadTags();
       } catch (e) {
-        this.tagError = `保存标签失败: ${String(e)}`;
+        this.tagError = this.fail("err.saveTag", e);
       } finally {
         this.tagSaving = false;
       }
     },
-    askDeleteTag(t) {
-      const bound = t.project_count > 0 ? `该标签已用于 ${t.project_count} 个项目,删除后同步解除绑定。` : "";
-      this.askConfirm("删除标签", `确定删除标签「${t.name}」?${bound}`, "删除", async () => {
-        try {
-          const resp = await fetch(this.apiUrl(`/api/console/tags/${encodeURIComponent(t.tag_id)}`), { method: "DELETE" });
-          if (!resp.ok) {
-            throw new Error(`HTTP ${resp.status}`);
+    askDeleteTag(tag) {
+      const n = tag.project_count || 0;
+      this.askConfirm({
+        titleKey: "confirm.deleteTag.title",
+        messageKey: "confirm.deleteTag.message",
+        params: { name: tag.name },
+        noteKey: n > 0 ? "confirm.deleteTag.bound" : "",
+        noteParams: { n },
+        confirmKey: "common.delete",
+        action: async () => {
+          try {
+            const resp = await fetch(this.apiUrl(`/api/console/tags/${encodeURIComponent(tag.tag_id)}`), { method: "DELETE" });
+            if (!resp.ok) {
+              throw await this.readError(resp);
+            }
+            this.projectTagFilter = this.projectTagFilter.filter((id) => id !== tag.tag_id);
+            if (this.filters.tag_id === tag.tag_id) {
+              this.filters.tag_id = "";
+            }
+            await this.loadTags();
+            await this.loadProjects(this.projectPage);
+          } catch (e) {
+            this.tagError = this.fail("err.del", e);
           }
-          this.projectTagFilter = this.projectTagFilter.filter((id) => id !== t.tag_id);
-          if (this.filters.tag_id === t.tag_id) {
-            this.filters.tag_id = "";
-          }
-          await this.loadTags();
-          await this.loadProjects(this.projectPage);
-        } catch (e) {
-          this.tagError = `删除失败: ${String(e)}`;
         }
       });
     },
@@ -449,19 +497,19 @@ createApp({
         const data = await resp.json();
         this.users = data.items || [];
       } catch (e) {
-        this.userError = `加载 Git 用户失败: ${String(e)}`;
+        this.userError = this.msg("err.loadUsers", { e: String(e) });
       }
     },
     openUserEdit(u) {
       this.userModal = { open: true, editingId: u.user_id, username: u.username, employeeNumber: u.employee_number || "" };
-      this.userError = "";
+      this.userError = null;
     },
     cancelUserModal() {
       this.userModal = { open: false, editingId: "", username: "", employeeNumber: "" };
-      this.userError = "";
+      this.userError = null;
     },
     async submitUserModal() {
-      this.userError = "";
+      this.userError = null;
       const form = this.userModal;
       this.userSaving = true;
       try {
@@ -471,13 +519,12 @@ createApp({
           body: JSON.stringify({ employee_number: form.employeeNumber })
         });
         if (!resp.ok) {
-          const detail = await resp.json().catch(() => ({}));
-          throw new Error(detail.detail || `HTTP ${resp.status}`);
+          throw await this.readError(resp);
         }
         this.cancelUserModal();
         await this.loadUsers();
       } catch (e) {
-        this.userError = `保存工号失败: ${String(e)}`;
+        this.userError = this.fail("err.saveEmployee", e);
       } finally {
         this.userSaving = false;
       }
@@ -509,11 +556,35 @@ createApp({
       return `tc-${hash % 5}`;
     },
     // ── 通用确认模态框 ─────────────────────────────────
-    askConfirm(title, message, confirmText, action) {
-      this.confirmModal = { open: true, title, message, confirmText: confirmText || "确定", loading: false, action };
+    // 收翻译键而非成串文本:弹窗开着时切语言,标题/正文/按钮都会跟着变。
+    askConfirm({ titleKey, messageKey, params, noteKey, noteParams, confirmKey, action }) {
+      this.confirmModal = {
+        open: true,
+        titleKey,
+        messageKey,
+        params: params || null,
+        noteKey: noteKey || "",
+        noteParams: noteParams || null,
+        confirmKey: confirmKey || "common.confirm",
+        loading: false,
+        action
+      };
+    },
+    // 正文 = 主句 +(可选)影响范围补充句。补充句带复数。
+    confirmMessage() {
+      const m = this.confirmModal;
+      if (!m.messageKey) {
+        return "";
+      }
+      const base = this.t(m.messageKey, m.params);
+      if (!m.noteKey) {
+        return base;
+      }
+      const n = m.noteParams ? m.noteParams.n : 0;
+      return `${base}${this.t("confirm.noteJoin")}${this.tc(m.noteKey, n, m.noteParams)}`;
     },
     closeConfirm() {
-      this.confirmModal = { open: false, title: "", message: "", confirmText: "", loading: false, action: null };
+      this.confirmModal = { open: false, titleKey: "", messageKey: "", params: null, noteKey: "", noteParams: null, confirmKey: "", loading: false, action: null };
     },
     async confirmModalAction() {
       const action = this.confirmModal.action;
@@ -530,17 +601,17 @@ createApp({
     },
     openProjectCreate() {
       this.projectForm = { project_id: "", project_url: "", channel_id: "", git_token_id: "" };
-      this.projectError = "";
+      this.projectError = null;
       this.projectCreateModal = { open: true };
     },
     cancelProjectCreate() {
       this.projectCreateModal = { open: false };
-      this.projectError = "";
+      this.projectError = null;
     },
     async submitProject() {
-      this.projectError = "";
+      this.projectError = null;
       if (!this.projectForm.project_id) {
-        this.projectError = "Project ID 必填";
+        this.projectError = this.msg("val.projectIdRequired");
         return;
       }
       this.projectSaving = true;
@@ -561,13 +632,12 @@ createApp({
           body: JSON.stringify(payload)
         });
         if (!resp.ok) {
-          const detail = await resp.json().catch(() => ({}));
-          throw new Error(detail.detail || `HTTP ${resp.status}`);
+          throw await this.readError(resp);
         }
         this.cancelProjectCreate();
         await this.loadProjects(1);
       } catch (e) {
-        this.projectError = `添加失败: ${String(e)}`;
+        this.projectError = this.fail("err.add", e);
       } finally {
         this.projectSaving = false;
       }
@@ -580,11 +650,11 @@ createApp({
         tokenId: p.git_token ? p.git_token.git_token_id : "",
         tagSelection: (p.tags || []).map((t) => t.tag_id)
       };
-      this.projectBindError = "";
+      this.projectBindError = null;
     },
     cancelProjectConfig() {
       this.projectConfigModal = { open: false, projectId: "", channelId: "", tokenId: "", tagSelection: [] };
-      this.projectBindError = "";
+      this.projectBindError = null;
     },
     toggleConfigTagSelection(tagId) {
       const sel = this.projectConfigModal.tagSelection;
@@ -594,7 +664,7 @@ createApp({
     },
     async saveProjectConfig() {
       const m = this.projectConfigModal;
-      this.projectBindError = "";
+      this.projectBindError = null;
       this.projectConfigSaving = true;
       try {
         const resp = await fetch(this.apiUrl(`/api/console/projects/${encodeURIComponent(m.projectId)}/channel`), {
@@ -603,8 +673,7 @@ createApp({
           body: JSON.stringify({ channel_id: m.channelId || null })
         });
         if (!resp.ok) {
-          const detail = await resp.json().catch(() => ({}));
-          throw new Error(detail.detail || `HTTP ${resp.status}`);
+          throw await this.readError(resp);
         }
         const resp2 = await fetch(this.apiUrl(`/api/console/projects/${encodeURIComponent(m.projectId)}/token`), {
           method: "PUT",
@@ -612,8 +681,7 @@ createApp({
           body: JSON.stringify({ git_token_id: m.tokenId || null })
         });
         if (!resp2.ok) {
-          const detail = await resp2.json().catch(() => ({}));
-          throw new Error(detail.detail || `HTTP ${resp2.status}`);
+          throw await this.readError(resp2);
         }
         const resp3 = await fetch(this.apiUrl(`/api/console/projects/${encodeURIComponent(m.projectId)}/tags`), {
           method: "PUT",
@@ -621,19 +689,101 @@ createApp({
           body: JSON.stringify({ tag_ids: m.tagSelection })
         });
         if (!resp3.ok) {
-          const detail = await resp3.json().catch(() => ({}));
-          throw new Error(detail.detail || `HTTP ${resp3.status}`);
+          throw await this.readError(resp3);
         }
         this.cancelProjectConfig();
         await this.loadProjects(this.projectPage);
       } catch (e) {
-        this.projectBindError = `保存失败: ${String(e)}`;
+        this.projectBindError = this.fail("err.save", e);
       } finally {
         this.projectConfigSaving = false;
       }
     },
+    // ── i18n ───────────────────────────────────────────
+    t(key, params) {
+      return OcrI18n.translate(this.lang, key, params);
+    },
+    // 带复数的变体。中文无需区分,英文按 n === 1 选 _one/_other。
+    tc(key, n, params) {
+      return OcrI18n.translate(this.lang, key, Object.assign({ n: n }, params), n);
+    },
+    // 消息描述符:存键 + 参数,渲染时才翻译,切换语言即时生效。
+    msg(key, params) {
+      return { key: key, params: params || null };
+    },
+    // 带前缀的嵌套描述符:先渲染 cause,再代入 prefix 的 {e} 占位。
+    wrap(prefixKey, cause) {
+      return { key: prefixKey, cause: cause };
+    },
+    // 把 readError 产出的描述符或普通异常统一成 cause。
+    toCause(e) {
+      return e && e.key ? e : this.msg("err.raw", { msg: String((e && e.message) || e) });
+    },
+    fail(prefixKey, e) {
+      return this.wrap(prefixKey, this.toCause(e));
+    },
+    msgText(m) {
+      if (!m || !m.key) {
+        return "";
+      }
+      if (m.cause) {
+        return this.t(m.key, { e: this.msgText(m.cause) });
+      }
+      return this.t(m.key, m.params);
+    },
+    statusLabel(status) {
+      if (!status) return "-";
+      const key = `status.${status}`;
+      const text = this.t(key);
+      return text === key ? status : text;
+    },
+    severityLabel(severity) {
+      const key = `severity.${severity || "unknown"}`;
+      const text = this.t(key);
+      return text === key ? (severity || "unknown") : text;
+    },
     typeLabel(type) {
-      return { feishu: "飞书", wechat: "企业微信", dingtalk: "钉钉" }[type] || type;
+      const key = `channelType.${type}`;
+      const text = this.t(key);
+      return text === key ? type : text;
+    },
+    applyLang(value) {
+      document.documentElement.lang = value;
+      document.title = this.t("doc.title");
+    },
+    toggleLang() {
+      this.lang = this.lang === "zh-CN" ? "en" : "zh-CN";
+    },
+    langLabel() {
+      // 按钮显示目标语言,且始终用目标语言自身书写,便于识别。
+      return this.lang === "zh-CN" ? "English" : "中文";
+    },
+    // 把响应体解析成消息描述符。三种形态都要兜住:
+    // 结构化 {code,...} / FastAPI 422 的对象数组 / 裸字符串。
+    async readError(resp) {
+      const body = await resp.json().catch(() => null);
+      const detail = body ? body.detail : undefined;
+      if (Array.isArray(detail)) {
+        const msg = detail.map((item) => (item && item.msg) || "").filter(Boolean).join("; ");
+        return this.msg("err.validation", { msg: msg || `HTTP ${resp.status}` });
+      }
+      if (detail && typeof detail === "object" && detail.code) {
+        return this.msg(`apierr.${detail.code}`, detail);
+      }
+      if (typeof detail === "string" && detail) {
+        return this.msg("err.raw", { msg: detail });
+      }
+      return this.msg("err.http", { status: resp.status });
+    },
+    // 从测试类接口的 {ok, error|error_code} 出参取错误文案。
+    testErrorText(result) {
+      if (!result || result.ok) return "";
+      if (result.error_code) {
+        const key = `apierr.${result.error_code}`;
+        const text = this.t(key);
+        if (text !== key) return text;
+      }
+      return result.error ? String(result.error) : this.t("err.http", { status: "" });
     },
     apiBase() {
       const path = window.location.pathname || "";
@@ -692,7 +842,7 @@ createApp({
       }
     },
     async loadTasks(page = 1, updateSelection = true, syncUrl = true) {
-      this.taskError = "";
+      this.taskError = null;
       this.taskPage = page;
       try {
         const params = this.taskQueryParams();
@@ -713,7 +863,7 @@ createApp({
           this.syncStateToUrl();
         }
       } catch (e) {
-        this.taskError = `Load tasks failed: ${String(e)}`;
+        this.taskError = this.msg("err.loadTasks", { e: String(e) });
       }
     },
     async changeTaskPage(page) {
@@ -762,7 +912,7 @@ createApp({
       this.syncStateToUrl();
     },
     async loadTaskDetail(taskId, reset = false) {
-      this.detailError = "";
+      this.detailError = null;
       if (reset) {
         this.taskDetail = null;
       }
@@ -773,7 +923,7 @@ createApp({
         }
         this.taskDetail = await resp.json();
       } catch (e) {
-        this.detailError = `Load detail failed: ${String(e)}`;
+        this.detailError = this.msg("err.loadDetail", { e: String(e) });
       }
     },
     async loadFindings(page = 1, reset = true, syncUrl = true) {
@@ -781,7 +931,7 @@ createApp({
         this.findingData = { items: [], total: 0, page: 1, page_size: this.findingPageSize };
         return;
       }
-      this.findingError = "";
+      this.findingError = null;
       if (reset) {
         this.findingData = { items: [], total: 0, page: 1, page_size: this.findingPageSize };
       }
@@ -804,13 +954,18 @@ createApp({
           this.syncStateToUrl();
         }
       } catch (e) {
-        this.findingError = `Load findings failed: ${String(e)}`;
+        this.findingError = this.msg("err.loadFindings", { e: String(e) });
       }
     },
     syncStateToUrl() {
       const params = new URLSearchParams();
       if (this.activeTab !== "review") {
         params.set("tab", this.activeTab);
+      }
+      // 非默认语言才入 URL:让本地化链接可分享,同时不给默认状态的地址栏添噪音。
+      // 沿用本文件「默认值省略」的既有约定(见 tab / task_page / days)。
+      if (this.lang !== this.browserLang) {
+        params.set("lang", this.lang);
       }
       for (const [k, v] of Object.entries(this.filters)) {
         if (v !== "") {
@@ -875,12 +1030,12 @@ createApp({
       }
       try {
         await navigator.clipboard.writeText(this.taskDetail.session_id);
-        this.copiedTip = "session_id copied";
+        this.copiedTip = this.msg("detail.copied");
       } catch (_) {
-        this.copiedTip = "copy failed";
+        this.copiedTip = this.msg("detail.copyFailed");
       }
       window.setTimeout(() => {
-        this.copiedTip = "";
+        this.copiedTip = null;
       }, 1800);
     },
     showTooltip(event, text) {
@@ -943,15 +1098,22 @@ createApp({
       }
       return s.replace("T", " ").slice(0, 19);
     },
-    elapsedSeconds(startedAt, finishedAt) {
-      if (!startedAt) {
+    // 收整个任务对象而非两个时间戳:耗时要不要按「当前时间」继续走,取决于状态。
+    // 终态(done/failed/cancelled/superseded)不再推进,缺 finished_at 只能显示 "-",
+    // 否则 8 秒轮询会让已取消的任务一直涨(历史库里就有这类 finished_at 为空的行)。
+    elapsedSeconds(task) {
+      if (!task || !task.started_at) {
         return "-";
       }
-      const start = this.parseTime(startedAt);
+      const start = this.parseTime(task.started_at);
       if (!start) {
         return "-";
       }
-      const end = this.parseTime(finishedAt) || new Date();
+      const end = this.parseTime(task.finished_at)
+        || (OcrI18n.TERMINAL_STATUSES.includes(task.status) ? null : new Date());
+      if (!end) {
+        return "-";
+      }
       const diffMs = end.getTime() - start.getTime();
       if (!Number.isFinite(diffMs) || diffMs < 0) {
         return "-";
@@ -977,7 +1139,7 @@ createApp({
     },
     number(v) {
       try {
-        return new Intl.NumberFormat("en-US").format(v || 0);
+        return new Intl.NumberFormat(this.lang === "zh-CN" ? "zh-CN" : "en-US").format(v || 0);
       } catch (_) {
         return String(v || 0);
       }

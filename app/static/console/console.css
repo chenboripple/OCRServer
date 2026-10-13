@@ -48,6 +48,21 @@ body {
   background: rgba(247, 250, 255, 0.85);
 }
 
+/* 头部右侧容器:语言切换按钮 + 上次刷新时间。
+   .top 是 space-between 的两栏,多一个兄弟节点就得包一层,否则三块均分。 */
+.top-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* 语言按钮不参与挤压:文案在「中文 / English」之间切换,宽度会变。 */
+.lang-toggle {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .top-meta {
   text-align: right;
   white-space: normal;
@@ -328,6 +343,8 @@ th {
 .s-done { background: #e8f8f2; color: #0d7a53; }
 .s-failed { background: #fdecec; color: #b82a2a; }
 .s-cancelled { background: #f3f4f6; color: #4b5563; }
+/* 被同 MR 的后续任务取代:同为终态,灰度比 cancelled 更淡一档以便区分 */
+.s-superseded { background: #f6f7f9; color: #6b7280; }
 .sev-critical { color: var(--critical); font-weight: 700; }
 .sev-high { color: var(--bad); font-weight: 700; }
 .sev-medium { color: var(--warn); font-weight: 700; }
@@ -607,6 +624,12 @@ details.raw > summary {
     flex-wrap: wrap;
     align-items: flex-start;
   }
+  .top-right {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  /* 换行后按钮独占一行,靠右与原桌面端视觉一致 */
+  .lang-toggle { margin-left: auto; }
   .top-meta {
     width: 100%;
     text-align: left;
