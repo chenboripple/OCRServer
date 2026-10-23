@@ -76,7 +76,9 @@ curl http://localhost:8000/health
 | `GET` | `/health` | 健康检查，返回 ocr 与 LLM 配置状态 |
 | `POST` | `/review` | 同步审核（约 3-7 分钟），返回 approve / 评论等 |
 | `POST` | `/gitlab/codeReview` | GitLab MR Webhook 入口 |
+| `POST` | `/api/review-branch` | 免 MR 分支评审：项目 + 源/目标分支直接触发，报告落控制台 + 源分支 head commit 评论 + 群推送 |
 | `GET` | `/status/{task_id}` | 查询异步审核任务状态 |
+| `POST` | `/mcp/mcp` | 远程 MCP endpoint（Bearer 鉴权，配置 `MCP_TOKEN` 才挂载） |
 
 `POST /review` 入参示例：
 
@@ -90,6 +92,40 @@ curl http://localhost:8000/health
   "commit_sha": ""
 }
 ```
+
+### 免 MR 分支评审 + MCP
+
+不发起 MR、直接审核分支（项目需已在控制台注册，或请求里带 `project_url`）：
+
+```bash
+curl -X POST http://localhost:8000/api/review-branch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project_id": "123",
+    "project_url": "https://gitlab.example.com/group/project.git",
+    "source_branch": "feature-x",
+    "target_branch": "main",
+    "author": "someone"
+  }'
+# → {"task_id":"...","status":"queued","commit_sha":"...","duplicate":false}
+curl http://localhost:8000/status/<task_id>   # 轮询到 done
+```
+
+配置 `MCP_TOKEN` 后，同一能力经远程 MCP 暴露（multica 等平台配
+`http://<host>/mcp/mcp` + Bearer token 即用），工具：
+`trigger_review` / `search_tasks` / `get_findings` / `wait_review` / `dashboard`。
+
+MCP 握手验证：
+
+```bash
+curl -X POST http://localhost:8000/mcp/mcp \
+  -H "Authorization: Bearer <MCP_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
+```
+
+详见 [免 MR 分支评审与 MCP](docs/功能文档/免MR分支评审与MCP.md)。
 
 ## GitLab Webhook 配置
 
