@@ -27,6 +27,10 @@ Environment=GITLAB_TOKEN=REPLACE_ME
 Environment=REPO_CACHE_DIR=/var/ocr/repos
 Environment=WORK_DIR=/var/ocr/work
 Environment=BLOCKING_SEVERITIES=critical,high
+# 远程 MCP endpoint(可选):非空才挂载 /mcp/mcp(Bearer 鉴权)
+Environment=MCP_TOKEN=
+# 分支评审推送里「查看报告」链接的服务对外根地址(空则不带链接)
+Environment=OCR_PUBLIC_BASE_URL=
 
 # 确保环境变量传给子进程(ocr)
 Environment=PYTHONUNBUFFERED=1

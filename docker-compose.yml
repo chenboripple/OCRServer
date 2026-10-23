@@ -99,6 +99,12 @@ services:
       # 须与 GitLab Webhook 设置里的 Secret token 一致
       - WEBHOOK_SECRET=${WEBHOOK_SECRET}
 
+      # --- 远程 MCP endpoint + 分支评审报告链接 (可选) ---
+      # MCP_TOKEN 非空时挂载 /mcp/mcp (Bearer 鉴权),为空则完全不暴露
+      - MCP_TOKEN=${MCP_TOKEN:-}
+      # 推送里「查看报告」链接的服务对外根地址(如 https://ocr.example.com),空则不带链接
+      - OCR_PUBLIC_BASE_URL=${OCR_PUBLIC_BASE_URL:-}
+
       # 注: OCR_SERVER_HOST/PORT、REPO_CACHE_DIR、WORK_DIR 由 Dockerfile ENV 提供默认值
       # (与 volume 挂载/EXPOSE 绑定),此处不再重复;如需覆盖请在此添加 ${VAR} 引用。
 
