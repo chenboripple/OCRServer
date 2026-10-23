@@ -121,7 +121,7 @@ def _mr_link_label(mr_title: str) -> str:
 
 def _build_content(*, project_name, source_branch, target_branch,
                    approve, summary, error, mr_title="", mr_url="",
-                   markdown_summary="") -> str:
+                   markdown_summary="", report_url="") -> str:
     """企业微信 text 消息内容。"""
     result, _ = _result_parts(approve, error)
     lines = [
@@ -136,13 +136,17 @@ def _build_content(*, project_name, source_branch, target_branch,
     if mr_url:
         # text 消息不支持超链接语法,URL 以裸文本展示(客户端自动识别为链接)
         lines.append(f"{_mr_link_label(mr_title)} {mr_url}")
+    if report_url:
+        # 免 MR 分支评审的控制台报告链接(空则省略)
+        lines.append(f"查看报告 {report_url}")
     return "\n".join(lines)
 
 
 def _build_card(*, project_name, source_branch, target_branch,
                 approve, summary, error, open_id: str,
                 mr_author: str = "", mr_url: str = "", mr_title: str = "",
-                markdown_summary: str = "", mr_employee_number: str = "") -> dict:
+                markdown_summary: str = "", mr_employee_number: str = "",
+                report_url: str = "") -> dict:
     """
     飞书 interactive 卡片:标题为审核结果,末尾附带 MR 链接。
 
@@ -195,6 +199,13 @@ def _build_card(*, project_name, source_branch, target_branch,
             "tag": "div",
             "text": {"tag": "lark_md", "content": f"[{_mr_link_label(mr_title)}]({mr_url})"},
         })
+    if report_url:
+        # 免 MR 分支评审的控制台报告链接(空则省略)
+        elements.append({"tag": "hr"})
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": f"[查看报告]({report_url})"},
+        })
     return {
         "header": {
             "title": {"tag": "plain_text", "content": f"代码审核 {result}"},
@@ -206,7 +217,8 @@ def _build_card(*, project_name, source_branch, target_branch,
 
 def _build_dingtalk_markdown(*, project_name, source_branch, target_branch,
                              approve, summary, error, mr_url: str = "",
-                             mr_title: str = "", markdown_summary: str = "") -> dict:
+                             mr_title: str = "", markdown_summary: str = "",
+                             report_url: str = "") -> dict:
     """钉钉 markdown 消息体。标题固定含"代码审核"关键词(钉钉机器人常配关键词过滤);
     艾特需要 atMobiles/atUserIds,现有用户映射表只有飞书 open_id,故钉钉不艾特。"""
     result, _ = _result_parts(approve, error)
@@ -220,6 +232,9 @@ def _build_dingtalk_markdown(*, project_name, source_branch, target_branch,
         lines.append(f"\n{_summary_line(markdown_summary, None)}")
     if mr_url:
         lines.append(f"- [{_mr_link_label(mr_title)}]({mr_url})")
+    if report_url:
+        # 免 MR 分支评审的控制台报告链接(空则省略)
+        lines.append(f"- [查看报告]({report_url})")
     return {
         "msgtype": "markdown",
         "markdown": {"title": f"代码审核 {result}", "text": "\n\n".join(lines)},
@@ -285,11 +300,12 @@ def dispatch(*, project_url: str, source_branch: str, target_branch: str,
              approve: bool, summary: str = "", error: str | None = None,
              mr_author: str = "", mr_iid: str = "", mr_title: str = "",
              markdown_summary: str = "", mr_employee_number: str = "",
-             channel: dict | None = None) -> None:
+             report_url: str = "", channel: dict | None = None) -> None:
     """发送审核结果通知。未配置或发送失败均不抛异常。
 
     channel: 项目绑定的推送配置({"type","webhook_url","sign_secret"}),
     传入时优先生效(独立于全局 NOTIFY_ENABLED 开关);否则回退全局 NOTIFY_* 配置。
+    report_url: 控制台报告链接(免 MR 分支评审);空则不带该行。
     """
     if channel is not None:
         ntype = (channel.get("type") or "").strip().lower()
@@ -323,6 +339,7 @@ def dispatch(*, project_url: str, source_branch: str, target_branch: str,
         mr_title=mr_title,
         mr_url=mr_url,
         markdown_summary=markdown_summary,
+        report_url=report_url,
     )
 
     card = None
@@ -341,6 +358,7 @@ def dispatch(*, project_url: str, source_branch: str, target_branch: str,
             mr_title=mr_title,
             markdown_summary=markdown_summary,
             mr_employee_number=mr_employee_number,
+            report_url=report_url,
         )
     elif ntype == "dingtalk":
         markdown = _build_dingtalk_markdown(
@@ -353,6 +371,7 @@ def dispatch(*, project_url: str, source_branch: str, target_branch: str,
             mr_url=mr_url,
             mr_title=mr_title,
             markdown_summary=markdown_summary,
+            report_url=report_url,
         )
 
     try:

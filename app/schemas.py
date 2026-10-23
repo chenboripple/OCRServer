@@ -50,6 +50,59 @@ class ReviewRequest(BaseModel):
         return value.lower() if value else value
 
 
+class BranchReviewRequest(BaseModel):
+    """免 MR 分支评审:给项目 + 源/目标分支即开始 review,结果落控制台报告 + commit 评论 + 推送。"""
+    project_id: str = Field(..., description="GitLab project id")
+    project_url: Optional[str] = Field(
+        None, description="仓库 https URL;项目未在控制台注册时必传"
+    )
+    source_branch: str = Field(..., description="源分支(评审其 head commit)")
+    target_branch: str = Field(..., description="目标分支(评审的 diff 基线)")
+    commit_sha: Optional[str] = Field(
+        None, description="源分支 commit sha(可选,缺省取分支 head)"
+    )
+    author: Optional[str] = Field(
+        None, description="发起人 GitLab 用户名(推送艾特用,可选)"
+    )
+
+    @validator("project_id")
+    def validate_project_id(cls, value: str) -> str:
+        if not _PROJECT_ID_RE.fullmatch(value):
+            raise ValueError("project_id must be a positive numeric GitLab project ID")
+        return value
+
+    @validator("source_branch", "target_branch")
+    def validate_branch(cls, value: str) -> str:
+        return _validate_ref(value)
+
+    @validator("commit_sha")
+    def validate_commit_sha(cls, value: Optional[str]) -> Optional[str]:
+        if value and not _SHA_RE.fullmatch(value):
+            raise ValueError("commit_sha must be a 40-character hexadecimal SHA")
+        return value.lower() if value else value
+
+    @validator("project_url")
+    def validate_project_url(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or not value.strip():
+            return None
+        value = value.strip()
+        if not value.startswith(("http://", "https://")):
+            raise ValueError("project_url 必须以 http:// 或 https:// 开头")
+        return value
+
+    @validator("author")
+    def validate_author(cls, value: Optional[str]) -> Optional[str]:
+        value = (value or "").strip()
+        return value or None
+
+
+class BranchReviewResponse(BaseModel):
+    task_id: str
+    status: str = "queued"
+    commit_sha: str = ""
+    duplicate: bool = False
+
+
 # ── 配置页:推送配置 / 项目清单 ────────────────────────────
 
 _CHANNEL_TYPES = ("feishu", "wechat", "dingtalk")

@@ -36,6 +36,23 @@ async def repost_worker():
                         log.warning("GitLab 客户端不可用,task=%s 暂不标记已回写", task.task_id)
                         continue
 
+                    # 免 MR 分支评审:报告发源分支 head commit 评论,绝不能落到 MR note
+                    # (mr_iid 为空,post_note 会 404 无限重试)
+                    if not task.mr_iid:
+                        from . import branch_report  # 延迟导入:branch_report 依赖本模块
+                        posted = branch_report.post_branch_report_from_db(gl, task)
+                        if posted:
+                            storage.update_status(task.task_id, task.status, gitlab_posted=1)
+                        else:
+                            storage.record_repost_attempt(task.task_id)
+                            log.warning(
+                                "repost branch 报告失败(task=%s,第 %d/%d 次)",
+                                task.task_id,
+                                task.repost_attempts + 1,
+                                config.REPOST_MAX_ATTEMPTS,
+                            )
+                        continue
+
                     body = task.summary or task.error or f"Task {task.task_id} {task.status}"
 
                     if task.pending_discussion_id and task.pending_note_id:
@@ -164,6 +181,46 @@ def _format_fallback_entry(c: dict) -> str:
     return f"#### `{path}:{line}`\n\n{body}"
 
 
+def sort_findings_by_severity(findings: list[dict]) -> list[dict]:
+    """按 severity 降序(critical 在前),同 severity 内按 path/line 升序稳定排序。"""
+    sev_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+    return sorted(
+        findings,
+        key=lambda c: (
+            -sev_rank.get((c.get("severity") or "").lower(), 0),  # 负值:critical(-4) 排前
+            c.get("path", ""),
+            c.get("start_line") or c.get("end_line") or 0,
+        ),
+    )
+
+
+def split_chunks(entries: list[str], limit: int) -> list[str]:
+    """把多条已格式化文本按 limit 字符分块(分隔符连接)。
+
+    单条自身超限(如 suggestion 极长)则截断保命。limit 由调用方传入
+    (读取 NOTE_BODY_LIMIT 模块变量需在调用时取值,便于测试 monkeypatch)。
+    """
+    sep = "\n\n---\n\n"
+    sep_len = len(sep)
+    chunks: list[str] = []
+    current: list[str] = []
+    current_size = 0
+    for entry in entries:
+        if len(entry) > limit:
+            entry = entry[: limit - 64] + "\n\n…(该条建议过长,已截断)"
+        add_len = len(entry) + (sep_len if current else 0)
+        if current and current_size + add_len > limit:
+            chunks.append(sep.join(current))
+            current = [entry]
+            current_size = len(entry)
+        else:
+            current.append(entry)
+            current_size += add_len
+    if current:
+        chunks.append(sep.join(current))
+    return chunks
+
+
 def _post_fallback_notes(gl: GitLabClient, req: ReviewRequest, failed: list[dict]) -> None:
     """把失败的 inline 评论拼成 markdown note 发出;单条超 NOTE_BODY_LIMIT 则拆分多条。
 
@@ -173,37 +230,8 @@ def _post_fallback_notes(gl: GitLabClient, req: ReviewRequest, failed: list[dict
         return
     total = len(failed)
 
-    # 按 severity 降序(critical 在前),同 severity 内按 path/line 升序稳定排序
-    sev_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1}
-    ordered = sorted(
-        failed,
-        key=lambda c: (
-            -sev_rank.get((c.get("severity") or "").lower(), 0),  # 负值:critical(-4) 排前
-            c.get("path", ""),
-            c.get("start_line") or c.get("end_line") or 0,
-        ),
-    )
-
-    sep = "\n\n---\n\n"
-    sep_len = len(sep)
-    chunks: list[str] = []
-    current: list[str] = []
-    current_size = 0
-    for c in ordered:
-        entry = _format_fallback_entry(c)
-        # 单条自身超限(极少见,如 suggestion 极长):截断保命,避免单条 note 超限
-        if len(entry) > NOTE_BODY_LIMIT:
-            entry = entry[: NOTE_BODY_LIMIT - 64] + "\n\n…(该条建议过长,已截断)"
-        add_len = len(entry) + (sep_len if current else 0)
-        if current and current_size + add_len > NOTE_BODY_LIMIT:
-            chunks.append(sep.join(current))
-            current = [entry]
-            current_size = len(entry)
-        else:
-            current.append(entry)
-            current_size += add_len
-    if current:
-        chunks.append(sep.join(current))
+    entries = [_format_fallback_entry(c) for c in sort_findings_by_severity(failed)]
+    chunks = split_chunks(entries, NOTE_BODY_LIMIT)
 
     n = len(chunks)
     for idx, chunk in enumerate(chunks, 1):

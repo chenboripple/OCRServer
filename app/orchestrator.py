@@ -3,6 +3,7 @@ import json
 import logging
 import shutil
 
+from . import branch_report
 from . import config
 from . import notifier
 from . import reviewer
@@ -10,7 +11,7 @@ from . import storage
 from .repost import post_to_gitlab
 from .rule_updater import review_config_lock, update_config_for_review
 from .runtime import executor, repo_cache, get_project_gitlab
-from .schemas import ReviewRequest, ReviewResponse
+from .schemas import BranchReviewRequest, BranchReviewResponse, ReviewRequest, ReviewResponse
 
 log = logging.getLogger("ocr-server")
 
@@ -88,14 +89,21 @@ def _resolve_channel(project_id: str) -> dict | None:
 
 def _submit_notify(*, project_url, source_branch, target_branch,
                    approve, summary="", error=None, markdown_summary="",
-                   gl=None, project_id="", mr_iid=""):
+                   gl=None, project_id="", mr_iid="",
+                   author="", report_url=""):
     """后台投递审核结果通知(失败不影响主流程)。
 
     推送路由:项目绑定的推送配置优先,未绑定回退全局 NOTIFY_* 环境变量配置。
     markdown_summary:回写 MR 的汇总详情,追加到推送消息(成功路径传入)。
+    author:免 MR 分支评审的发起人(mr_iid 为空时作为艾特对象)。
+    report_url:控制台报告链接(免 MR 分支评审);空则推送不带该行。
     """
     channel = _resolve_channel(project_id)
-    mr_author, mr_title, mr_employee_number = _mr_details(gl, project_id, mr_iid, channel)
+    if mr_iid:
+        mr_author, mr_title, mr_employee_number = _mr_details(gl, project_id, mr_iid, channel)
+    else:
+        # 分支评审无 MR 可查:用提交时的发起人艾特,标题/工号留空
+        mr_author, mr_title, mr_employee_number = author, "", ""
     try:
         executor.submit(
             notifier.dispatch,
@@ -110,6 +118,7 @@ def _submit_notify(*, project_url, source_branch, target_branch,
             mr_employee_number=mr_employee_number,
             mr_title=mr_title,
             mr_iid=mr_iid,
+            report_url=report_url,
             channel=channel,
         )
     except Exception as e:
@@ -213,6 +222,98 @@ def do_review_sync(req: ReviewRequest) -> ReviewResponse:
             repo_cache.cleanup_worktree(wt_path)
 
 
+class BranchReviewError(Exception):
+    """免 MR 分支评审提交失败。code 是机器可读错误码,路由层映射为 HTTP 状态。"""
+
+    def __init__(self, code: str, message: str, status: int = 400):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.status = status
+
+
+def _report_url(task_id: str) -> str:
+    """控制台报告链接;未配置 OCR_PUBLIC_BASE_URL 返回空串(推送省略该行)。"""
+    if not config.OCR_PUBLIC_BASE_URL:
+        return ""
+    return f"{config.OCR_PUBLIC_BASE_URL.rstrip('/')}/console?task_id={task_id}"
+
+
+def start_branch_review(req: BranchReviewRequest) -> BranchReviewResponse:
+    """免 MR 分支评审入口:解析源分支 head → 建任务 → 投给审核线程池。
+
+    手动触发,绕过 should_trigger_review 分支/标题门禁(显式意图)。
+    head sha 必须在建任务前解析:UNIQUE(project_id, mr_iid='', commit_sha)
+    依赖真实 sha 去重,空 sha 会让同项目所有分支任务互相误判 duplicate。
+    """
+    # 项目解析:控制台注册过的项目用登记的 URL,否则要求请求自带 project_url
+    project = None
+    try:
+        project = storage.project_repo.get(req.project_id)
+    except Exception as e:
+        log.warning(f"查询项目注册信息失败(project_id={req.project_id}): {e}")
+    project_url = (project.project_url if project else "") or req.project_url or ""
+    if not project_url:
+        raise BranchReviewError(
+            "project_not_registered",
+            "项目未在控制台注册且未提供 project_url",
+            status=400,
+        )
+
+    gl = get_project_gitlab(req.project_id)
+    clone_url = project_url
+    git_env = None
+    if gl:
+        clone_url = gl.clone_url(project_url)
+        git_env = gl.git_auth_env()
+
+    # 解析源分支 head(顺带 fetch 进 bare cache,worker 侧 prepare 增量秒级)
+    try:
+        repo_cache.fetch_branches(req.project_id, clone_url, [req.source_branch], git_env=git_env)
+        head_sha = repo_cache.get_ref_sha(req.project_id, req.source_branch)
+    except Exception as e:
+        raise BranchReviewError(
+            "branch_not_found",
+            f"源分支 {req.source_branch} 不存在或无法访问: {e}",
+            status=404,
+        ) from e
+
+    # 背压:与 webhook 相同的队列上限,排队任务数超限直接拒绝
+    if storage.get_queued_count() >= config.MAX_QUEUED_REVIEWS:
+        raise BranchReviewError("queue_full", "审核队列已满,请稍后重试", status=429)
+
+    commit_sha = req.commit_sha or head_sha
+    task_id, created = storage.create_task(
+        project_id=req.project_id,
+        mr_iid="",
+        source_branch=req.source_branch,
+        target_branch=req.target_branch,
+        commit_sha=commit_sha,
+        project_url=project_url,
+        source="branch",
+        author=req.author,
+    )
+    if created:
+        submit_to_executor(task_id)
+        log.info(
+            f"分支评审任务已创建: task={task_id}, "
+            f"{req.source_branch}@{commit_sha[:12]} -> {req.target_branch}"
+        )
+    else:
+        log.info(f"分支评审去重命中(同项目同分支同 commit): task={task_id}")
+
+    status = "queued"
+    if not created:
+        existing = storage.get_task(task_id)
+        status = existing.status if existing else "queued"
+    return BranchReviewResponse(
+        task_id=task_id,
+        status=status,
+        commit_sha=commit_sha,
+        duplicate=not created,
+    )
+
+
 def _check_mr_open(gl, project_id: str, mr_iid: str):
     """查询 MR 是否仍处于 open 状态。
 
@@ -250,26 +351,33 @@ def _cancel_closed_mr(gl, task) -> None:
 
 
 def do_review_async(task_id: str):
-    """异步 worker:跑 review + resolve discussion + 回写 inline + 落库结果。"""
+    """异步 worker:跑 review + resolve discussion + 回写 inline + 落库结果。
+
+    免 MR 分支评审(mr_iid='')共用本 worker,但跳过全部 MR 步骤
+    (MR 状态校验/diff_refs 超级替换/pending discussion/失败结论 note),
+    审核结论经 branch_report 落到源分支 head commit 评论。
+    """
     task = storage.claim_task(task_id)
     if not task:
         log.info(f"Task {task_id} was already claimed or is not queued, skipping")
         return
 
-    log.info(f"Starting async review for task {task_id}, MR {task.mr_iid}")
+    is_branch = not task.mr_iid
+    log.info(f"Starting async review for task {task_id}, MR {task.mr_iid or '(branch review)'}")
 
     # 项目绑定的 Git 令牌优先(拉代码 + MR 评论),未绑定回退全局 GITLAB_TOKEN。
     # claim 后按持久化的 task.project_id 现查,恢复/补偿路径也能拿到最新绑定。
     gl = get_project_gitlab(task.project_id)
 
     # 从队列取回后先校验 MR 是否仍 open;已关闭/合并则取消,避免白跑 ocr(省 LLM 成本)
-    if gl and _check_mr_open(gl, task.project_id, task.mr_iid) is False:
+    if gl and not is_branch and _check_mr_open(gl, task.project_id, task.mr_iid) is False:
         _cancel_closed_mr(gl, task)
         return
 
     # Webhooks are commit snapshots. Do not review or write findings for an
     # older head once a newer push has reached the MR.
-    if gl and task.commit_sha:
+    # (分支评审的 commit 在提交时已钉死,无 MR head 可比对,跳过)
+    if gl and not is_branch and task.commit_sha:
         try:
             refs = gl.get_diff_refs(task.project_id, task.mr_iid)
             if refs and refs.get("head_sha") and refs["head_sha"] != task.commit_sha:
@@ -288,7 +396,7 @@ def do_review_async(task_id: str):
 
         # External GitLab traffic belongs to the worker, never to the webhook
         # response path. Persist IDs before the review so recovery can finish it.
-        if not task.pending_discussion_id:
+        if not is_branch and not task.pending_discussion_id:
             try:
                 pending = gl.create_discussion(task.project_id, task.mr_iid, "⏳ 审核中，请稍候...")
                 storage.update_status(task_id, "running", pending_discussion_id=pending["id"], pending_note_id=pending["note_id"])
@@ -315,42 +423,51 @@ def do_review_async(task_id: str):
             result_json = reviewer.run_ocr(wt_path, target_sha, to_sha)
         rr = reviewer.decide(result_json)
         storage.save_review_artifacts(task_id, result_json, rr)
-        log.info(f"Task {task_id} MR !{task.mr_iid} done: approve={rr.approve}, {rr.summary_text}")
+        log.info(f"Task {task_id} {'branch ' + task.source_branch if is_branch else 'MR !' + task.mr_iid} done: approve={rr.approve}, {rr.summary_text}")
 
-        # 3. 构建结论 body
-        conclusion_body = f"{rr.summary_text}\n\n{rr.markdown_summary}"
-
-        # 4. resolve pending discussion(如果有)
+        # 3. 投递审核结论
         gitlab_posted = 0
-        if gl and task.pending_discussion_id and task.pending_note_id:
-            try:
-                gl.update_note(
-                    task.project_id, task.mr_iid,
-                    task.pending_discussion_id, task.pending_note_id,
-                    conclusion_body,
-                )
-                gl.resolve_discussion(task.project_id, task.mr_iid, task.pending_discussion_id)
-                gitlab_posted = 1
-            except Exception as e:
-                log.warning(f"Failed to resolve discussion: {e}")
-                # 留着让 repost_worker 补发
-
-            # 5. 回写 inline comments(结论已写入 pending discussion,不再重复发 summary note)
-            if rr.comments:
+        if is_branch:
+            # 免 MR 分支评审:报告落源分支 head commit 评论;失败置 0 交 repost 补偿
+            if gl:
                 try:
-                    req = ReviewRequest(
-                        project_id=task.project_id,
-                        project_url=task.project_url,
-                        source_branch=task.source_branch,
-                        target_branch=task.target_branch,
-                        mr_iid=task.mr_iid,
-                        commit_sha=task.commit_sha,
-                    )
-                    # post_summary: 仅当 pending conclusion 写入失败(gitlab_posted=0)时才补发 summary;
-                    # 否则 markdown_summary 已在 conclusion_body 内写进 pending discussion,再发会造成两条总结
-                    post_to_gitlab(gl, req, rr, post_summary=(gitlab_posted == 0))
+                    gitlab_posted = 1 if branch_report.post_branch_report(gl, task, rr) else 0
                 except Exception as e:
-                    log.warning(f"GitLab inline post failed: {e}")
+                    log.warning(f"branch 报告投递失败(交 repost 补偿): {e}")
+        else:
+            # 3. 构建结论 body
+            conclusion_body = f"{rr.summary_text}\n\n{rr.markdown_summary}"
+
+            # 4. resolve pending discussion(如果有)
+            if gl and task.pending_discussion_id and task.pending_note_id:
+                try:
+                    gl.update_note(
+                        task.project_id, task.mr_iid,
+                        task.pending_discussion_id, task.pending_note_id,
+                        conclusion_body,
+                    )
+                    gl.resolve_discussion(task.project_id, task.mr_iid, task.pending_discussion_id)
+                    gitlab_posted = 1
+                except Exception as e:
+                    log.warning(f"Failed to resolve discussion: {e}")
+                    # 留着让 repost_worker 补发
+
+                # 5. 回写 inline comments(结论已写入 pending discussion,不再重复发 summary note)
+                if rr.comments:
+                    try:
+                        req = ReviewRequest(
+                            project_id=task.project_id,
+                            project_url=task.project_url,
+                            source_branch=task.source_branch,
+                            target_branch=task.target_branch,
+                            mr_iid=task.mr_iid,
+                            commit_sha=task.commit_sha,
+                        )
+                        # post_summary: 仅当 pending conclusion 写入失败(gitlab_posted=0)时才补发 summary;
+                        # 否则 markdown_summary 已在 conclusion_body 内写进 pending discussion,再发会造成两条总结
+                        post_to_gitlab(gl, req, rr, post_summary=(gitlab_posted == 0))
+                    except Exception as e:
+                        log.warning(f"GitLab inline post failed: {e}")
 
         # 6. 更新状态
         storage.update_status(
@@ -369,6 +486,8 @@ def do_review_async(task_id: str):
             summary=rr.summary_text,
             markdown_summary=rr.markdown_summary,
             gl=gl, project_id=task.project_id, mr_iid=task.mr_iid,
+            author=task.author or "",
+            report_url=_report_url(task_id) if is_branch else "",
         )
 
     except Exception as e:
@@ -385,9 +504,11 @@ def do_review_async(task_id: str):
             approve=False,
             error=str(e),
             gl=gl, project_id=task.project_id, mr_iid=task.mr_iid,
+            author=task.author or "",
+            report_url=_report_url(task_id) if is_branch else "",
         )
-        # 尝试发失败结论
-        if gl and task.pending_discussion_id and task.pending_note_id:
+        # 尝试发失败结论(分支评审无 pending discussion;失败详情已落库,控制台可查)
+        if gl and not is_branch and task.pending_discussion_id and task.pending_note_id:
             try:
                 gl.update_note(
                     task.project_id, task.mr_iid,

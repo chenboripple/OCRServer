@@ -64,6 +64,7 @@ def init_db():
                 started_at     TEXT,
                 finished_at    TEXT,
                 source         TEXT DEFAULT 'webhook',
+                author         TEXT,
                 UNIQUE(project_id, mr_iid, commit_sha)
             )
         """)
@@ -89,6 +90,8 @@ def init_db():
             "started_at": "started_at TEXT",
             "finished_at": "finished_at TEXT",
             "source": "source TEXT DEFAULT 'webhook'",
+            # 免 MR 分支评审的发起人 GitLab 用户名(推送艾特用);MR 任务为 NULL
+            "author": "author TEXT",
         })
 
         conn.execute("""

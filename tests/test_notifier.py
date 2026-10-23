@@ -445,3 +445,77 @@ def test_dispatch_employee_number_skips_open_id_lookup(feishu_notify, monkeypatc
     )
     elements = sent["body"]["card"]["elements"]
     assert "<at id=E00123></at>" in elements[-3]["text"]["content"]
+
+
+# ── 免 MR 分支评审:report_url 渲染 ─────────────────
+
+def test_wechat_content_appends_report_url_plain():
+    """企微 text:报告链接以裸文本展示;空则省略该行。"""
+    content = notifier._build_content(
+        project_name="group/repo", source_branch="feature-x", target_branch="main",
+        approve=True, summary="ok", error=None,
+        report_url="http://ocr.example.com/console?task_id=t1",
+    )
+    assert "查看报告 http://ocr.example.com/console?task_id=t1" in content
+    # 不传 report_url 时不出现该行
+    no_url = notifier._build_content(
+        project_name="group/repo", source_branch="feature-x", target_branch="main",
+        approve=True, summary="ok", error=None,
+    )
+    assert "查看报告" not in no_url
+
+
+def test_feishu_card_appends_report_link(feishu_notify):
+    """飞书卡片:报告链接为 markdown 超链接元素;空则省略。"""
+    card = notifier._build_card(
+        project_name="group/repo", source_branch="feature-x", target_branch="main",
+        approve=False, summary="s", error=None, open_id="ou_zhangsan",
+        report_url="http://ocr.example.com/console?task_id=t1",
+    )
+    assert card["elements"][-1]["text"]["content"] == "[查看报告](http://ocr.example.com/console?task_id=t1)"
+    assert card["elements"][-2]["tag"] == "hr"
+
+    no_url = notifier._build_card(
+        project_name="group/repo", source_branch="feature-x", target_branch="main",
+        approve=False, summary="s", error=None, open_id="ou_zhangsan",
+    )
+    assert all("[查看报告]" not in (e.get("text") or {}).get("content", "") for e in no_url["elements"])
+
+
+def test_dingtalk_markdown_appends_report_link():
+    md = notifier._build_dingtalk_markdown(
+        project_name="group/repo", source_branch="feature-x", target_branch="main",
+        approve=True, summary="ok", error=None,
+        report_url="http://ocr.example.com/console?task_id=t1",
+    )
+    assert "- [查看报告](http://ocr.example.com/console?task_id=t1)" in md["markdown"]["text"]
+    no_url = notifier._build_dingtalk_markdown(
+        project_name="group/repo", source_branch="feature-x", target_branch="main",
+        approve=True, summary="ok", error=None,
+    )
+    assert "查看报告" not in no_url["markdown"]["text"]
+
+
+def test_dispatch_passes_report_url_to_builders(feishu_notify, monkeypatch):
+    """dispatch 的 report_url 参数透传到具体 builder。"""
+    sent = {}
+
+    class FakeResp:
+        status_code = 200
+
+        def json(self):
+            return {"code": 0}
+
+    monkeypatch.setattr(
+        notifier.httpx.Client, "post",
+        lambda self, url, json=None: (sent.update(body=json), FakeResp())[1],
+    )
+    notifier.dispatch(
+        project_url="https://gitlab.example.com/group/repo.git",
+        source_branch="feature-x", target_branch="main",
+        approve=False, summary="存在问题", mr_iid="",
+        report_url="http://ocr.example.com/console?task_id=t1",
+    )
+    contents = (sent["body"]["card"]["elements"])
+    assert any("[查看报告](http://ocr.example.com/console?task_id=t1)" in
+               (e.get("text") or {}).get("content", "") for e in contents)

@@ -252,6 +252,39 @@ class GitLabClient:
         except GitLabError:
             return False
 
+    # ── commit 评论(免 MR 分支评审报告落点)──────────────────
+    def post_commit_comment(
+        self,
+        project_id: str,
+        sha: str,
+        note: str,
+        path: str | None = None,
+        line: int | None = None,
+        line_type: str = "new",
+    ) -> bool:
+        """在 commit 下发一条评论。
+
+        无 path/line = 汇总评论(永远成功);带 path/line = 行级评论,
+        行号基于 parent..commit diff,与目标分支 diff 可能错位,失败仅返回 False
+        (调用方按 best-effort 处理,完整内容在汇总评论里)。
+        """
+        data: dict[str, Any] = {"note": note}
+        if path:
+            data["path"] = path
+        if line:
+            data["line"] = line
+            data["line_type"] = line_type
+        try:
+            self._api(
+                "POST",
+                f"/projects/{project_id}/repository/commits/{sha}/comments",
+                data,
+            )
+            time.sleep(self.success_delay)
+            return True
+        except GitLabError:
+            return False
+
     def create_discussion(self, project_id: str, mr_iid: str, body: str) -> dict:
         """创建一条新 discussion，返回 {id, note_id}"""
         resp = self._api(

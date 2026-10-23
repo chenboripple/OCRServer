@@ -26,6 +26,7 @@ def _row_to_task(row) -> ReviewTask:
         project_url=row["project_url"],
         status=row["status"],
         source=row["source"] or "webhook",
+        author=row["author"],
         approve=bool(row["approve"]) if row["approve"] is not None else None,
         summary=row["summary"],
         stats_json=row["stats_json"],
@@ -55,6 +56,7 @@ class TaskRepository:
         source: str = "webhook",
         pending_discussion_id: Optional[str] = None,
         pending_note_id: Optional[str] = None,
+        author: Optional[str] = None,
         created_at: Optional[str] = None,
     ) -> tuple[str, bool]:
         """
@@ -79,11 +81,12 @@ class TaskRepository:
                 conn.execute("""
                     INSERT INTO review_task
                     (task_id, project_id, mr_iid, source_branch, target_branch, commit_sha,
-                     project_url, status, source, pending_discussion_id, pending_note_id, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     project_url, status, source, pending_discussion_id, pending_note_id, author, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     task_id, project_id, mr_iid, source_branch, target_branch, commit_sha,
-                    project_url, "queued", source, pending_discussion_id, pending_note_id, created_at,
+                    project_url, "queued", source, pending_discussion_id, pending_note_id,
+                    author, created_at,
                 ))
                 # A newer webhook supersedes only work that has not started.
                 # Running work is checked against the live MR head by worker.
@@ -92,6 +95,15 @@ class TaskRepository:
                         "UPDATE review_task SET status = 'superseded', finished_at = ? "
                         "WHERE project_id = ? AND mr_iid = ? AND task_id <> ? AND status = 'queued'",
                         (created_at, project_id, mr_iid, task_id),
+                    )
+                elif source == "branch":
+                    # 免 MR 分支评审:同项目同源分支又提交了新评审,排队中的旧任务作废
+                    # (mr_iid='' 只圈定分支任务,不影响该项目的 MR 任务)。
+                    conn.execute(
+                        "UPDATE review_task SET status = 'superseded', finished_at = ? "
+                        "WHERE project_id = ? AND source_branch = ? AND mr_iid = '' "
+                        "AND task_id <> ? AND status = 'queued'",
+                        (created_at, project_id, source_branch, task_id),
                     )
             except sqlite3.IntegrityError:
                 # 并发下另一事务已插入同 (project_id, mr_iid, commit_sha),回退为返回已有任务

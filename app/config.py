@@ -142,6 +142,14 @@ OCR_CONFIG_PATH = Path(
     _env("OCR_CONFIG_PATH", str(Path.home() / ".opencodereview" / "config.json"))
 )
 
+# ── 免 MR 分支评审 / MCP ────────────────────────────────────
+# 服务对外根地址(如 https://ocr.example.com),用于拼接控制台报告链接;
+# 留空则推送通知里不带报告链接(报告仍可在控制台看)。
+OCR_PUBLIC_BASE_URL = _env("OCR_PUBLIC_BASE_URL", "")
+# 远程 MCP endpoint(streamable HTTP)的 Bearer 访问令牌。
+# 留空则不挂载 /mcp endpoint(默认关闭);配置后端点为 {base}/mcp/mcp。
+MCP_TOKEN = _env("MCP_TOKEN", "")
+
 # ── 审核触发策略 ────────────────────────────────────────────
 # 目标分支为这些分支时,始终触发 OCR 审核
 REQUIRED_REVIEW_BRANCHES = set(

@@ -68,6 +68,7 @@ class ReviewTask:
     project_url: str
     status: str
     source: str = "webhook"
+    author: Optional[str] = None   # 免 MR 分支评审的发起人 GitLab 用户名
     approve: Optional[bool] = None
     summary: Optional[str] = None
     stats_json: Optional[str] = None
