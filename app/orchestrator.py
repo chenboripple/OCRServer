@@ -8,9 +8,10 @@ from . import config
 from . import notifier
 from . import reviewer
 from . import storage
+from .gitlab_client import project_path_id
 from .repost import post_to_gitlab
 from .rule_updater import review_config_lock, update_config_for_review
-from .runtime import executor, repo_cache, get_project_gitlab
+from .runtime import executor, repo_cache, get_gitlab, get_project_gitlab
 from .schemas import BranchReviewRequest, BranchReviewResponse, ReviewRequest, ReviewResponse
 
 log = logging.getLogger("ocr-server")
@@ -76,12 +77,16 @@ def _mr_details(gl, project_id: str, mr_iid: str, channel: dict | None = None) -
         return "", "", ""
 
 
-def _resolve_channel(project_id: str) -> dict | None:
-    """查项目绑定的推送配置;未绑定/查询失败返回 None(回退全局 NOTIFY_* 配置)。"""
-    if not project_id:
+def _resolve_channel(project_id: str, project_url: str = "") -> dict | None:
+    """查项目绑定的推送配置;未绑定/查询失败返回 None(回退全局 NOTIFY_* 配置)。
+
+    project_id 查不到时按 project_url 归一化兜底(任务 ID 形态与注册行不一致时
+    也能找到同一行的绑定)。
+    """
+    if not project_id and not project_url:
         return None
     try:
-        return storage.project_repo.resolve_channel(project_id)
+        return storage.project_repo.resolve_channel(project_id, project_url)
     except Exception as e:
         log.warning(f"查询项目推送配置失败(project_id={project_id},回退全局配置): {e}")
         return None
@@ -98,7 +103,7 @@ def _submit_notify(*, project_url, source_branch, target_branch,
     author:免 MR 分支评审的发起人(mr_iid 为空时作为艾特对象)。
     report_url:控制台报告链接(免 MR 分支评审);空则推送不带该行。
     """
-    channel = _resolve_channel(project_id)
+    channel = _resolve_channel(project_id, project_url)
     if mr_iid:
         mr_author, mr_title, mr_employee_number = _mr_details(gl, project_id, mr_iid, channel)
     else:
@@ -144,7 +149,7 @@ def do_review_sync(req: ReviewRequest) -> ReviewResponse:
     clone_url = req.project_url
     git_env = None
     # 项目绑定的 Git 令牌优先(拉代码 + MR 评论),未绑定回退全局 GITLAB_TOKEN
-    gl = get_project_gitlab(req.project_id)
+    gl = get_project_gitlab(req.project_id, req.project_url)
     if gl:
         log.info(f"GitLab 客户端已初始化，进行 URL 转换")
         clone_url = gl.clone_url(req.project_url)
@@ -246,12 +251,38 @@ def start_branch_review(req: BranchReviewRequest) -> BranchReviewResponse:
     head sha 必须在建任务前解析:UNIQUE(project_id, mr_iid='', commit_sha)
     依赖真实 sha 去重,空 sha 会让同项目所有分支任务互相误判 duplicate。
     """
-    # 项目解析:控制台注册过的项目用登记的 URL,否则要求请求自带 project_url
+    # 身份解析:URL 一等身份,数字 ID 优选值(本地易得的只有 remote URL)。
+    # 1) 显式 project_id(数字或路径) → 直接用作行 ID(注册收敛交给 upsert);
+    # 2) 仅 project_url → get_by_url 复用已注册行(数字/路径 ID 均可);
+    #    未注册 → GitLab API best-effort 解析数字 ID(全局 token 可能无权限),
+    #    解析不出 → URL-编码路径 ID 一等注册,控制台仍可绑专属 token 后重试。
+    pid = (req.project_id or "").strip()
     project = None
     try:
-        project = storage.project_repo.get(req.project_id)
+        if pid:
+            project = storage.project_repo.get(pid)
+        else:
+            project = storage.project_repo.get_by_url(req.project_url)
     except Exception as e:
-        log.warning(f"查询项目注册信息失败(project_id={req.project_id}): {e}")
+        log.warning(f"查询项目注册信息失败(project_id={req.project_id}, project_url={req.project_url}): {e}")
+
+    if not pid:
+        if project:
+            pid = project.project_id
+        else:
+            gl_probe = get_gitlab()
+            info = gl_probe.get_project(req.project_url) if gl_probe else None
+            if info and str(info.get("id") or "").isdigit():
+                pid = str(info["id"])
+            else:
+                pid = project_path_id(req.project_url)
+    if not pid:
+        raise BranchReviewError(
+            "project_not_registered",
+            "无法确定项目身份:project_id 与 project_url 均不可用",
+            status=400,
+        )
+
     project_url = (project.project_url if project else "") or req.project_url or ""
     if not project_url:
         raise BranchReviewError(
@@ -260,7 +291,7 @@ def start_branch_review(req: BranchReviewRequest) -> BranchReviewResponse:
             status=400,
         )
 
-    gl = get_project_gitlab(req.project_id)
+    gl = get_project_gitlab(pid, project_url)
     clone_url = project_url
     git_env = None
     if gl:
@@ -269,8 +300,8 @@ def start_branch_review(req: BranchReviewRequest) -> BranchReviewResponse:
 
     # 解析源分支 head(顺带 fetch 进 bare cache,worker 侧 prepare 增量秒级)
     try:
-        repo_cache.fetch_branches(req.project_id, clone_url, [req.source_branch], git_env=git_env)
-        head_sha = repo_cache.get_ref_sha(req.project_id, req.source_branch)
+        repo_cache.fetch_branches(pid, clone_url, [req.source_branch], git_env=git_env)
+        head_sha = repo_cache.get_ref_sha(pid, req.source_branch)
     except Exception as e:
         raise BranchReviewError(
             "branch_not_found",
@@ -284,7 +315,7 @@ def start_branch_review(req: BranchReviewRequest) -> BranchReviewResponse:
 
     commit_sha = req.commit_sha or head_sha
     task_id, created = storage.create_task(
-        project_id=req.project_id,
+        project_id=pid,
         mr_iid="",
         source_branch=req.source_branch,
         target_branch=req.target_branch,
@@ -311,6 +342,7 @@ def start_branch_review(req: BranchReviewRequest) -> BranchReviewResponse:
         status=status,
         commit_sha=commit_sha,
         duplicate=not created,
+        project_id=pid,
     )
 
 
@@ -366,8 +398,9 @@ def do_review_async(task_id: str):
     log.info(f"Starting async review for task {task_id}, MR {task.mr_iid or '(branch review)'}")
 
     # 项目绑定的 Git 令牌优先(拉代码 + MR 评论),未绑定回退全局 GITLAB_TOKEN。
-    # claim 后按持久化的 task.project_id 现查,恢复/补偿路径也能拿到最新绑定。
-    gl = get_project_gitlab(task.project_id)
+    # claim 后按持久化的 task.project_id 现查,恢复/补偿路径也能拿到最新绑定;
+    # ID 形态与注册行不一致(如 URL 行已升级成数字主键)时按 task.project_url 兜底。
+    gl = get_project_gitlab(task.project_id, task.project_url)
 
     # 从队列取回后先校验 MR 是否仍 open;已关闭/合并则取消,避免白跑 ocr(省 LLM 成本)
     if gl and not is_branch and _check_mr_open(gl, task.project_id, task.mr_iid) is False:

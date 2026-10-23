@@ -95,21 +95,24 @@ curl http://localhost:8000/health
 
 ### 免 MR 分支评审 + MCP
 
-不发起 MR、直接审核分支（项目需已在控制台注册，或请求里带 `project_url`）：
+不发起 MR、直接审核分支。**项目以仓库 URL 为主标识**（`project_id` 数字可选），
+URL 支持 http(s)/ssh/git@ 任意 remote 形式：
 
 ```bash
 curl -X POST http://localhost:8000/api/review-branch \
   -H "Content-Type: application/json" \
   -d '{
-    "project_id": "123",
-    "project_url": "https://gitlab.example.com/group/project.git",
+    "project_url": "http://code.jms.com/group/project.git",
     "source_branch": "feature-x",
     "target_branch": "main",
     "author": "someone"
   }'
-# → {"task_id":"...","status":"queued","commit_sha":"...","duplicate":false}
+# → {"task_id":"...","status":"queued","commit_sha":"...","duplicate":false,"project_id":"123"}
 curl http://localhost:8000/status/<task_id>   # 轮询到 done
 ```
+
+未注册的仓库首次触发会自动注册（能解析到数字 ID 用数字，解析不出用 URL-编码
+路径 ID 一等注册——全局 token 无权限的仓库也能先注册、绑专属 token 后评审）。
 
 配置 `MCP_TOKEN` 后，同一能力经远程 MCP 暴露（multica 等平台配
 `http://<host>/mcp/mcp` + Bearer token 即用），工具：

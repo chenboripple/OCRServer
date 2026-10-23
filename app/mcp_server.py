@@ -56,20 +56,22 @@ def _brief(task: dict) -> dict:
 @mcp.tool(
     description=(
         "提交免 MR 代码评审:给定项目 + 源分支 + 目标分支即开始 review,"
-        "无需发起 MR。返回 task_id(供 get_findings/wait_review 使用)。"
+        "无需发起 MR。项目以仓库 URL 为主标识(project_url,支持 http/ssh/git@ 形式,"
+        "推荐直接传 git remote get-url origin 的输出);project_id(数字)可选,兼容老调用方。"
+        "返回 task_id(供 get_findings/wait_review 使用)与解析后的 project_id。"
         "同项目同分支同 commit 重复提交会去重(duplicate=true)。"
     )
 )
 def trigger_review(
-    project_id: str,
     source_branch: str,
     target_branch: str,
     project_url: str = "",
+    project_id: str = "",
     author: str = "",
     commit_sha: str = "",
 ) -> dict:
     req = BranchReviewRequest(
-        project_id=project_id,
+        project_id=project_id or None,
         project_url=project_url or None,
         source_branch=source_branch,
         target_branch=target_branch,
@@ -86,6 +88,7 @@ def trigger_review(
         "status": resp.status,
         "commit_sha": resp.commit_sha,
         "duplicate": resp.duplicate,
+        "project_id": resp.project_id,
         "hint": "评审通常 3~15 分钟;用 wait_review 等待,或稍后 get_findings 查看明细",
     }
 

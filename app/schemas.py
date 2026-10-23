@@ -2,7 +2,9 @@
 import re
 from typing import Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, root_validator, validator
+
+from .gitlab_client import normalize_project_url
 
 
 _PROJECT_ID_RE = re.compile(r"^[1-9][0-9]{0,18}$")
@@ -51,10 +53,17 @@ class ReviewRequest(BaseModel):
 
 
 class BranchReviewRequest(BaseModel):
-    """免 MR 分支评审:给项目 + 源/目标分支即开始 review,结果落控制台报告 + commit 评论 + 推送。"""
-    project_id: str = Field(..., description="GitLab project id")
+    """免 MR 分支评审:给项目 + 源/目标分支即开始 review,结果落控制台报告 + commit 评论 + 推送。
+
+    身份标识以仓库 URL 为主(本地 clone 里只有 remote URL,数字 ID 需到 GitLab 查):
+    project_url 支持任意常见 remote 形式;project_id 可选(数字,老调用方兼容),
+    两者至少提供一个。
+    """
+    project_id: Optional[str] = Field(
+        None, description="GitLab project id(可选,数字)"
+    )
     project_url: Optional[str] = Field(
-        None, description="仓库 https URL;项目未在控制台注册时必传"
+        None, description="仓库 URL(http(s)/ssh://git@/git@host: 形式均可),主标识"
     )
     source_branch: str = Field(..., description="源分支(评审其 head commit)")
     target_branch: str = Field(..., description="目标分支(评审的 diff 基线)")
@@ -66,7 +75,10 @@ class BranchReviewRequest(BaseModel):
     )
 
     @validator("project_id")
-    def validate_project_id(cls, value: str) -> str:
+    def validate_project_id(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or not value.strip():
+            return None
+        value = value.strip()
         if not _PROJECT_ID_RE.fullmatch(value):
             raise ValueError("project_id must be a positive numeric GitLab project ID")
         return value
@@ -86,8 +98,11 @@ class BranchReviewRequest(BaseModel):
         if value is None or not value.strip():
             return None
         value = value.strip()
-        if not value.startswith(("http://", "https://")):
-            raise ValueError("project_url 必须以 http:// 或 https:// 开头")
+        if not normalize_project_url(value):
+            raise ValueError(
+                "project_url 必须是合法仓库 URL:"
+                "http(s)://host/path、ssh://git@host[:port]/path 或 git@host:path"
+            )
         return value
 
     @validator("author")
@@ -95,12 +110,19 @@ class BranchReviewRequest(BaseModel):
         value = (value or "").strip()
         return value or None
 
+    @root_validator(skip_on_failure=True)
+    def validate_identity(cls, values):
+        if not values.get("project_id") and not values.get("project_url"):
+            raise ValueError("project_id 与 project_url 至少提供一个(URL 为主标识)")
+        return values
+
 
 class BranchReviewResponse(BaseModel):
     task_id: str
     status: str = "queued"
     commit_sha: str = ""
     duplicate: bool = False
+    project_id: str = ""  # 解析后的生效行 ID(数字优先,否则 URL-编码路径)
 
 
 # ── 配置页:推送配置 / 项目清单 ────────────────────────────
@@ -181,18 +203,40 @@ class ChannelUpdate(BaseModel):
 
 
 class ProjectCreate(BaseModel):
-    """手动添加项目。project_id 须与 GitLab 项目 ID(数字)一致。"""
-    project_id: str = Field(..., description="GitLab project id")
-    project_url: str = Field("", description="仓库 URL(可选)")
+    """手动添加项目:数字 ID 或仓库 URL 至少一个。
+
+    URL-only 时服务端 best-effort 解析数字 ID(全局 token 可能无权限),
+    解析不出用 URL-编码路径 ID 一等注册——之后照样可绑专属 git token/推送配置。
+    """
+    project_id: Optional[str] = Field(None, description="GitLab project id(可选,数字)")
+    project_url: str = Field("", description="仓库 URL(数字 ID 未提供时必填)")
     channel_id: Optional[str] = Field(None, description="绑定的推送配置(可选)")
     git_token_id: Optional[str] = Field(None, description="绑定的 Git 令牌(可选)")
 
     @validator("project_id")
-    def validate_project_id(cls, value: str) -> str:
+    def validate_project_id(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or not value.strip():
+            return None
         value = value.strip()
         if not _PROJECT_ID_RE.fullmatch(value):
             raise ValueError("project_id must be a positive numeric GitLab project ID")
         return value
+
+    @validator("project_url")
+    def validate_project_url(cls, value: str) -> str:
+        value = value.strip()
+        if value and not normalize_project_url(value):
+            raise ValueError(
+                "project_url 必须是合法仓库 URL:"
+                "http(s)://host/path、ssh://git@host[:port]/path 或 git@host:path"
+            )
+        return value
+
+    @root_validator(skip_on_failure=True)
+    def validate_identity(cls, values):
+        if not values.get("project_id") and not values.get("project_url"):
+            raise ValueError("project_id 与 project_url 至少提供一个")
+        return values
 
 
 class ProjectBind(BaseModel):

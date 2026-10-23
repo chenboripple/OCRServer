@@ -252,6 +252,65 @@ def test_project_api_bind_unbind_and_channel_delete(tmp_path, monkeypatch):
         assert resp.status_code == 404
 
 
+def test_create_project_url_only(tmp_path, monkeypatch):
+    """URL-only 添加:解析出数字 ID 用数字;解析失败用路径 ID 一等注册;重复贴 URL 幂等。"""
+    from app.routes import console as console_routes
+
+    with _config_client(tmp_path, monkeypatch) as client:
+        class _Resolver:
+            def __init__(self, info):
+                self.info = info
+
+            def get_project(self, ident):
+                return self.info
+
+        # 1) 全局 token 有权限:URL → 数字 ID
+        monkeypatch.setattr(console_routes, "get_gitlab", lambda: _Resolver({"id": 55}))
+        resp = client.post("/api/console/projects", json={
+            "project_url": "https://gitlab.example.com/g/p.git",
+        })
+        assert resp.status_code == 201
+        assert resp.json()["project_id"] == "55"
+
+        # 2) 重复贴同一 URL(数字 ID 形式):幂等,仍是同一行
+        resp = client.post("/api/console/projects", json={"project_id": "55"})
+        assert resp.status_code == 201
+        assert client.get("/api/console/projects").json()["total"] == 1
+
+        # 3) 全局 token 无权限:路径 ID 一等注册,同样 201
+        monkeypatch.setattr(console_routes, "get_gitlab", lambda: _Resolver(None))
+        resp = client.post("/api/console/projects", json={
+            "project_url": "https://gitlab.example.com/g/secret.git",
+        })
+        assert resp.status_code == 201
+        assert resp.json()["project_id"] == "g%2Fsecret"
+        # 路径 ID 行照样可绑令牌(token 权限场景闭环)。
+        # 路径 ID 里的 % 需再编码一层(前端 encodeURIComponent 同理),否则 %2F 被路由解成 /
+        from urllib.parse import quote
+        token = client.post("/api/console/tokens", json={
+            "name": "专属令牌", "token": "glpat-x1",
+        }).json()
+        resp = client.put(f"/api/console/projects/{quote('g%2Fsecret', safe='')}/token", json={
+            "git_token_id": token["git_token_id"],
+        })
+        assert resp.status_code == 200
+        assert resp.json()["git_token"]["name"] == "专属令牌"
+
+        # 4) 再贴同一 URL(换了 token 也解析不出):幂等返回现有路径行
+        resp = client.post("/api/console/projects", json={
+            "project_url": "https://gitlab.example.com/g/secret.git",
+        })
+        assert resp.status_code == 201
+        assert resp.json()["project_id"] == "g%2Fsecret"
+        assert client.get("/api/console/projects").json()["total"] == 2
+
+
+def test_create_project_rejects_neither_id_nor_url(tmp_path, monkeypatch):
+    with _config_client(tmp_path, monkeypatch) as client:
+        resp = client.post("/api/console/projects", json={})
+        assert resp.status_code == 422
+
+
 def test_channel_test_endpoint_uses_stored_secret(tmp_path, monkeypatch):
     with _config_client(tmp_path, monkeypatch) as client:
         from app import notifier

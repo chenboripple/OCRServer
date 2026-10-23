@@ -32,6 +32,7 @@ class ReviewProject:
     project_url: str = ""
     channel_id: Optional[str] = None
     git_token_id: Optional[str] = None
+    url_key: Optional[str] = None  # 归一化 host/path,同一仓库唯一行的匹配键
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 

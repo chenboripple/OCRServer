@@ -294,9 +294,9 @@
         },
         project: {
           create: "手动添加项目",
-          idLabel: "Project ID",
+          idLabel: "项目 ID(数字,可选)",
           idPh: "GitLab project id(数字)",
-          urlLabel: "项目 URL(可选)",
+          urlLabel: "仓库 URL(与 ID 至少填一个)",
           bindChannel: "绑定推送配置(可选)",
           bindToken: "绑定 Git 令牌(可选)",
           notNow: "暂不绑定",
@@ -337,7 +337,7 @@
         nameRequired: "名称必填",
         tokenRequired: "Token 必填",
         tagNameRequired: "标签名必填",
-        projectIdRequired: "Project ID 必填"
+        projectIdRequired: "项目 ID 与仓库 URL 至少填一个"
       },
 
       err: {
@@ -369,7 +369,8 @@
         token_not_found: "Git 令牌不存在",
         tag_not_found: "标签不存在",
         user_not_found: "用户不存在",
-        project_not_found: "项目不存在"
+        project_not_found: "项目不存在",
+        project_identity_unresolvable: "无法确定项目身份:请填数字 ID 或可解析的仓库 URL"
       },
 
       note: {
@@ -653,9 +654,9 @@
         },
         project: {
           create: "Add project manually",
-          idLabel: "Project ID",
+          idLabel: "Project ID (numeric, optional)",
           idPh: "GitLab project id (numeric)",
-          urlLabel: "Project URL (optional)",
+          urlLabel: "Repo URL (ID or URL, at least one)",
           bindChannel: "Bind notification config (optional)",
           bindToken: "Bind Git token (optional)",
           notNow: "Not now",
@@ -696,7 +697,7 @@
         nameRequired: "Name is required",
         tokenRequired: "Token is required",
         tagNameRequired: "Tag name is required",
-        projectIdRequired: "Project ID is required"
+        projectIdRequired: "Project ID or repo URL is required"
       },
 
       err: {
@@ -728,7 +729,8 @@
         token_not_found: "Git token not found",
         tag_not_found: "Tag not found",
         user_not_found: "User not found",
-        project_not_found: "Project not found"
+        project_not_found: "Project not found",
+        project_identity_unresolvable: "Cannot resolve project identity: provide a numeric ID or a parsable repo URL"
       },
 
       note: {

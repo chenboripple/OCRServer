@@ -757,12 +757,12 @@
         </div>
         <form class="modal-body form-grid" @submit.prevent="submitProject">
           <div class="field">
-            <label>{{ t('modal.project.idLabel') }} {{ t('common.required') }}</label>
+            <label>{{ t('modal.project.idLabel') }}</label>
             <input v-model.trim="projectForm.project_id" :placeholder="t('modal.project.idPh')" />
           </div>
           <div class="field">
             <label>{{ t('modal.project.urlLabel') }}</label>
-            <input v-model.trim="projectForm.project_url" placeholder="https://gitlab.example.com/group/repo" />
+            <input v-model.trim="projectForm.project_url" placeholder="https://gitlab.example.com/group/repo 或 git@host:group/repo.git" />
           </div>
           <div class="field field-span-2">
             <label>{{ t('modal.project.bindChannel') }}</label>

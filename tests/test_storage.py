@@ -411,6 +411,167 @@ def test_project_list_joins_token_name(temp_storage):
     assert by_id["43"]["git_token"] is None
 
 
+# ── URL 一等身份:单行收敛(补进去 / 原地升级 / 裂行合并) ────
+
+_URL = "https://gitlab.example.com/group/project.git"
+_URL_KEY = "gitlab.example.com/group/project"
+_PATH_ID = "group%2Fproject"
+
+
+def test_get_by_url_matches_all_remote_forms(temp_storage):
+    storage.project_repo.upsert("42", _URL)
+    for variant in (
+        _URL,
+        "https://gitlab.example.com/group/project.git/",     # 尾斜杠
+        "http://gitlab.example.com/group/project",           # http + 无 .git
+        "ssh://git@gitlab.example.com:2222/group/project.git",  # ssh 带端口
+        "git@gitlab.example.com:group/project.git",          # scp 形式
+        "https://GitLab.Example.COM/group/project.git",      # host 大小写
+    ):
+        assert storage.project_repo.get_by_url(variant).project_id == "42", variant
+    # 解析不了/未登记 -> None
+    assert storage.project_repo.get_by_url("not a url") is None
+    assert storage.project_repo.get_by_url("https://gitlab.example.com/other/repo.git") is None
+
+
+def test_upsert_url_fills_into_existing_id_row(temp_storage):
+    """数字行先建、URL 后到:补进同一行,不插新行。"""
+    storage.project_repo.upsert("42", "")
+    assert storage.project_repo.upsert("42", _URL) == "42"
+    project = storage.project_repo.get("42")
+    assert project.project_url == _URL
+    assert project.url_key == _URL_KEY
+    assert storage.project_repo.list(page=1, page_size=50)["total"] == 1
+
+
+def test_upsert_numeric_rekeys_url_row_in_place(temp_storage):
+    """URL 行先建(路径 ID)、数字 ID 后到:原地升级为主键数字 ID,绑定与标签随迁。"""
+    channel = _make_channel()
+    tag = storage.tag_repo.create(name="核心")
+    assert storage.project_repo.upsert(_PATH_ID, _URL) == _PATH_ID
+    storage.project_repo.bind(_PATH_ID, channel.channel_id)
+    storage.tag_repo.set_project_tags(_PATH_ID, [tag.tag_id])
+
+    # 数字 ID 与 URL 一起到达(webhook 场景):行原地升级,不删行不插新行
+    assert storage.project_repo.upsert("77", _URL) == "77"
+    assert storage.project_repo.get(_PATH_ID) is None          # 路径 ID 行已升级
+    project = storage.project_repo.get("77")
+    assert project.url_key == _URL_KEY
+    assert project.channel_id == channel.channel_id             # 绑定随迁
+    tags = storage.tag_repo.project_tag_map(["77"])["77"]       # 标签随迁
+    assert [t["tag_id"] for t in tags] == [tag.tag_id]
+    assert storage.project_repo.list(page=1, page_size=50)["total"] == 1
+
+
+def test_upsert_merges_duplicate_rows(temp_storage):
+    """裂行自愈:数字无 URL 行 + 路径行并存时,数字 ID + URL 到达合并回一行。"""
+    channel = _make_channel()
+    tok = _make_token()
+    tag = storage.tag_repo.create(name="支付")
+    storage.project_repo.upsert("77", "")                       # 数字行(无 URL)
+    storage.project_repo.bind("77", channel.channel_id)
+    storage.project_repo.upsert(_PATH_ID, _URL)                 # 路径行(带 URL)
+    storage.project_repo.bind_token(_PATH_ID, tok.git_token_id)
+    storage.tag_repo.set_project_tags(_PATH_ID, [tag.tag_id])
+
+    assert storage.project_repo.upsert("77", _URL) == "77"
+    assert storage.project_repo.get(_PATH_ID) is None
+    project = storage.project_repo.get("77")
+    assert project.url_key == _URL_KEY
+    assert project.channel_id == channel.channel_id             # 保留行绑定优先
+    assert project.git_token_id == tok.git_token_id             # 空缺从被并行吸收
+    assert [t["tag_id"] for t in storage.tag_repo.project_tag_map(["77"])["77"]] == [tag.tag_id]
+    assert storage.project_repo.list(page=1, page_size=50)["total"] == 1
+
+
+def test_upsert_url_only_hit_does_not_insert_second_row(temp_storage):
+    """URL 命中已注册行:只刷新,不插新行,返回该行 ID。"""
+    storage.project_repo.upsert("42", _URL)
+    assert storage.project_repo.upsert("43", _URL) == "42"
+    assert storage.project_repo.get("43") is None
+    assert storage.project_repo.list(page=1, page_size=50)["total"] == 1
+
+
+def test_upsert_url_only_new_row_registers_path_id(temp_storage):
+    """无数字 ID、URL 未注册:从 URL 派生路径 ID 一等注册。"""
+    assert storage.project_repo.upsert("", _URL) == _PATH_ID
+    project = storage.project_repo.get(_PATH_ID)
+    assert project.project_url == _URL
+    assert project.url_key == _URL_KEY
+    # 无 ID 且 URL 解析不出任何形态:不登记
+    assert storage.project_repo.upsert("", "not a url") == ""
+
+
+def test_resolve_project_id_then_url_fallback(temp_storage):
+    storage.project_repo.upsert("77", _URL)
+    # ID 直查命中
+    assert storage.project_repo.resolve_project("77").project_id == "77"
+    # ID 查不到(旧路径 ID 任务)按 URL 兜底找回同一行
+    assert storage.project_repo.resolve_project(_PATH_ID, _URL).project_id == "77"
+    # 两者都查不到
+    assert storage.project_repo.resolve_project("999", "https://gitlab.example.com/x/y.git") is None
+
+
+def test_resolve_channel_and_token_fall_back_to_url(temp_storage):
+    """ID 形态与注册行不一致时,通道/令牌解析按 URL 兜底。"""
+    channel = _make_channel()
+    tok = _make_token(token="glpat-url-fallback")
+    storage.project_repo.upsert("77", _URL)
+    storage.project_repo.bind("77", channel.channel_id)
+    storage.project_repo.bind_token("77", tok.git_token_id)
+    assert storage.project_repo.resolve_channel(_PATH_ID, _URL)["channel_id"] == channel.channel_id
+    assert storage.project_repo.resolve_git_token(_PATH_ID, _URL) == "glpat-url-fallback"
+
+
+def test_create_task_uses_effective_row_id(temp_storage):
+    """任务落库用 upsert 返回的生效行 ID:同仓跨 ID 形态不分裂。"""
+    storage.project_repo.upsert("77", _URL)
+    task_id, created = storage.create_task(
+        project_id=_PATH_ID, mr_iid="1", source_branch="f", target_branch="main",
+        commit_sha="sha1", project_url=_URL, source="webhook",
+    )
+    assert created
+    assert storage.get_task(task_id).project_id == "77"
+
+
+def test_init_db_backfills_url_key(tmp_path, monkeypatch):
+    """存量行启动时回填 url_key;同 URL 脏数据保留首行,后者不回填。"""
+    from app import config
+
+    db = tmp_path / "legacy-urlkey.db"
+    monkeypatch.setattr(config, "STORAGE_PATH", db)
+    conn = sqlite3.connect(str(db))
+    try:
+        conn.execute("""
+            CREATE TABLE review_project (
+                project_id TEXT PRIMARY KEY, project_url TEXT NOT NULL DEFAULT '',
+                channel_id TEXT, git_token_id TEXT,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            )
+        """)
+        conn.executemany(
+            "INSERT INTO review_project VALUES (?, ?, NULL, NULL, '2026-01-01', '2026-01-01')",
+            [
+                ("42", _URL),
+                ("43", "https://gitlab.example.com/other/r.git"),
+                ("44", _URL),        # 脏数据:与 42 同 URL
+                ("45", ""),          # 无 URL:不回填
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    storage.init_db()
+    assert storage.project_repo.get("42").url_key == _URL_KEY
+    assert storage.project_repo.get("43").url_key == "gitlab.example.com/other/r"
+    # 脏数据保留先创建的行(42 已占用该 url_key),44 不回填等待 upsert 收编
+    assert storage.project_repo.get("44").url_key is None
+    assert storage.project_repo.get("45").url_key is None
+    # 回填后 get_by_url 可用
+    assert storage.project_repo.get_by_url(_URL).project_id == "42"
+
+
 def test_init_db_migrates_legacy_review_project(tmp_path, monkeypatch):
     """旧库(无 git_token_id 列)经 init_db 迁移后,绑定/级联解绑可用。"""
     from app import config

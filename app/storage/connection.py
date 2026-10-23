@@ -3,6 +3,7 @@ import sqlite3
 from contextlib import contextmanager
 
 from .. import config
+from ..gitlab_client import normalize_project_url
 
 
 def _ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, ddl: str):
@@ -15,6 +16,32 @@ def _ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, 
 def _ensure_columns(conn: sqlite3.Connection, table_name: str, columns: dict[str, str]):
     for column_name, ddl in columns.items():
         _ensure_column(conn, table_name, column_name, ddl)
+
+
+def _backfill_url_key(conn: sqlite3.Connection):
+    """存量行回填 url_key(幂等,每次启动只处理 NULL 行)。
+
+    同一 url_key 已被其他行占用(历史脏数据)时保留先创建的行,
+    本行不回填——后续 upsert 的合并分支会把它收编。
+    """
+    rows = conn.execute(
+        "SELECT project_id, project_url FROM review_project "
+        "WHERE url_key IS NULL AND project_url <> ''"
+    ).fetchall()
+    for row in rows:
+        key = normalize_project_url(row["project_url"])
+        if not key:
+            continue
+        dup = conn.execute(
+            "SELECT 1 FROM review_project WHERE url_key = ? AND project_id <> ? LIMIT 1",
+            (key, row["project_id"]),
+        ).fetchone()
+        if dup:
+            continue
+        conn.execute(
+            "UPDATE review_project SET url_key = ? WHERE project_id = ?",
+            (key, row["project_id"]),
+        )
 
 
 @contextmanager
@@ -229,6 +256,15 @@ def init_db():
         _ensure_columns(conn, "review_project", {
             "git_token_id": "git_token_id TEXT REFERENCES git_token(git_token_id) ON DELETE SET NULL",
         })
+        # URL 一等身份:url_key = 归一化 host/path,用于"同一仓库无论数字 ID 还是
+        # 路径 ID 先到,注册表最终只有一行"。部分唯一索引(NULL 不冲突,
+        # 历史 project_url 为空/解析失败的行不参与唯一性)。
+        _ensure_columns(conn, "review_project", {"url_key": "url_key TEXT"})
+        _backfill_url_key(conn)
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_review_project_url_key
+            ON review_project(url_key) WHERE url_key IS NOT NULL
+        """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_notify_channel_name ON notify_channel(name)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_review_project_channel ON review_project(channel_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_git_token_name ON git_token(name)")

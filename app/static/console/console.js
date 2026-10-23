@@ -610,15 +610,16 @@ createApp({
     },
     async submitProject() {
       this.projectError = null;
-      if (!this.projectForm.project_id) {
+      // 数字 ID 与仓库 URL 至少填一个(URL 也支持直接贴 git@/ssh 形式的 remote)
+      if (!this.projectForm.project_id && !this.projectForm.project_url) {
         this.projectError = this.msg("val.projectIdRequired");
         return;
       }
       this.projectSaving = true;
       try {
         const payload = {
-          project_id: this.projectForm.project_id,
-          project_url: this.projectForm.project_url
+          project_id: this.projectForm.project_id || null,
+          project_url: (this.projectForm.project_url || "").trim()
         };
         if (this.projectForm.channel_id) {
           payload.channel_id = this.projectForm.channel_id;

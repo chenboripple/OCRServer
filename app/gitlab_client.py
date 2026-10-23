@@ -12,12 +12,80 @@ import time
 import urllib.error
 import urllib.request
 from typing import Any
+from urllib.parse import quote
 
 from . import config
 
 
 class GitLabError(Exception):
     pass
+
+
+def _split_repo_url(project_url: str) -> tuple[str, str]:
+    """把任意形式的仓库 URL 拆成 (host, path),解析失败返回 ("", "")。
+
+    支持 http(s)://user@host:port/group/project[.git]、ssh://git@host:port/group/project.git、
+    git@host:group/project.git(scp 形式);去掉协议/userinfo/.git/尾斜杠,host 小写。
+    host 的 :port 一并剥离(ssh 带端口与不带端口、http 默认端口视为同一 host;
+    同 host 不同端口部署两个 GitLab 的场景忽略)。
+    """
+    if not project_url:
+        return "", ""
+    url = project_url.strip()
+    host = ""
+    path = ""
+
+    if url.startswith(("http://", "https://")):
+        rest = url.split("://", 1)[1]
+        host, _, path = rest.partition("/")
+        host = host.split("@", 1)[-1]  # 去 userinfo
+    elif url.startswith("ssh://"):
+        rest = url.split("://", 1)[1]
+        at = rest.find("@")
+        if at >= 0:
+            rest = rest[at + 1:]
+        host, _, path = rest.partition("/")
+    elif ":" in url and "@" in url.split(":", 1)[0]:
+        # scp 形式: git@host:group/project.git(含任意用户名前缀)
+        head, _, tail = url.partition(":")
+        host = head.split("@", 1)[-1]
+        path = tail
+    else:
+        return "", ""
+
+    host = host.strip().lower()
+    if ":" in host:
+        host = host.split(":", 1)[0]  # 剥离端口
+    path = path.strip().strip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    if not host or not path:
+        return "", ""
+    return host, path
+
+
+def normalize_project_url(project_url: str) -> str:
+    """把任意形式的仓库 URL 归一化为 "host/path" 匹配键。
+
+    解析不了返回 ""(调用方据此跳过 URL 匹配,不误伤)。
+    """
+    host, path = _split_repo_url(project_url)
+    if not host or not path:
+        return ""
+    return f"{host}/{path}"
+
+
+def project_path_id(project_url: str) -> str:
+    """从仓库 URL 提取 URL-编码的项目路径(如 group%2Fproject)。
+
+    作为"解析不出数字 ID"时的一等注册 ID:GitLab API v4 的 {id} 占位符
+    接受 URL-编码路径,该形态的行可以直接用于拉 MR/发评论。
+    解析失败返回 ""。
+    """
+    _, path = _split_repo_url(project_url)
+    if not path:
+        return ""
+    return quote(path, safe="")
 
 
 class GitLabClient:
@@ -174,6 +242,29 @@ class GitLabClient:
         if not resp or not isinstance(resp, dict):
             raise GitLabError("Failed to get current user: invalid response")
         return resp
+
+    # ── 项目信息(URL → 数字 ID 解析用)─────────────────────
+    def get_project(self, project_id_or_path: str) -> dict | None:
+        """GET /projects/{id}:支持数字 ID、完整项目路径或完整仓库 URL。
+
+        best-effort:任何 GitLabError(404 无权限/不存在、网络错误)返回 None,不抛出。
+        路径形式按 GitLab API v4 要求 URL-编码(group%2Fproject)后请求;
+        仓库 URL(http/ssh/git@ 形式)先抽出项目路径再编码。
+        """
+        ident = (project_id_or_path or "").strip()
+        if not ident:
+            return None
+        if not ident.isdigit():
+            # 完整仓库 URL 先抽出项目路径;裸路径(group/project)原样走下面的编码
+            _, path = _split_repo_url(ident)
+            ident = path or ident
+            if not ident.isdigit():
+                ident = quote(ident, safe="")
+        try:
+            resp = self._api("GET", f"/projects/{ident}")
+        except GitLabError:
+            return None
+        return resp if isinstance(resp, dict) else None
 
     # ── MR diff_refs(inline 评论定位必需)────────────────────
     def get_diff_refs(self, project_id: str, mr_iid: str) -> dict | None:

@@ -30,8 +30,7 @@ MR webhook 评审要求先发起 MR。分支评审（`source="branch"`）允许*
 
 ```json
 {
-  "project_id": "123",
-  "project_url": "https://gitlab.example.com/group/repo.git",
+  "project_url": "http://code.jms.com/group/repo.git",
   "source_branch": "feature-x",
   "target_branch": "main",
   "commit_sha": null,
@@ -39,24 +38,32 @@ MR webhook 评审要求先发起 MR。分支评审（`source="branch"`）允许*
 }
 ```
 
-- `project_url`：项目已在控制台注册（配置页项目清单）时可省略，否则必填。
+- **项目以仓库 URL 为主标识**（本地 clone 里只有 remote URL，数字 ID 要去 GitLab 查）：
+  `project_url` 支持 http(s)/`ssh://git@host:port/`/`git@host:` 三种 remote 形式，
+  归一化（去协议/userinfo/端口/`.git`，host 小写）后匹配注册行。
+- `project_id`（数字）可选，兼容老调用方；两者至少提供一个。
 - `commit_sha`：可选；缺省取源分支当前 head。
 - `author`：可选；GitLab 用户名，推送通知时艾特。
 
-返回：
+身份解析顺序：显式 `project_id` 直接用 → URL 命中已注册行则复用该行 →
+未注册时 GitLab API best-effort 解析数字 ID → 解析不出（如全局 token 无权限）
+用 URL-编码路径 ID（`group%2Fproject`，GitLab API 合法形态）**一等注册**，
+之后照样可绑专属 git token / 推送配置。
+
+返回（`project_id` 为解析后的生效行 ID）：
 
 ```json
-{ "task_id": "uuid", "status": "queued", "commit_sha": "40位sha", "duplicate": false }
+{ "task_id": "uuid", "status": "queued", "commit_sha": "40位sha", "duplicate": false, "project_id": "123" }
 ```
 
 错误码（`detail.code`，与控制台同风格）：
 
 | HTTP | code | 场景 |
 |---|---|---|
-| 400 | `project_not_registered` | 项目未注册且未提供 project_url |
+| 400 | `project_not_registered` | 无法确定项目身份（ID 与 URL 均不可用） |
 | 404 | `branch_not_found` | 源分支不存在 / 无法访问 |
 | 429 | `queue_full` | 排队任务数达 `MAX_QUEUED_REVIEWS` |
-| 422 | - | 请求体校验失败（pydantic 默认） |
+| 422 | - | 请求体校验失败（ID 与 URL 都没给等） |
 
 之后用 `GET /status/{task_id}` 轮询，`status=done` 后控制台
 `/console?task_id=...` 看报告，问题明细在任务详情页。
@@ -70,7 +77,7 @@ MR webhook 评审要求先发起 MR。分支评审（`source="branch"`）允许*
 
 | 工具 | 说明 |
 |---|---|
-| `trigger_review` | 提交分支评审（同 `POST /api/review-branch`），返回 task_id |
+| `trigger_review` | 提交分支评审（同 `POST /api/review-branch`），`project_url` 为主标识，返回 task_id 与解析后的 project_id |
 | `search_tasks` | 列任务，按项目/分支/状态/approve/来源过滤 |
 | `get_findings` | 取任务全部问题明细（`min_severity` 过滤，按严重度降序） |
 | `wait_review` | 轮询等待任务终态（≤300s，超时返回 `state=timeout` 可续调） |
@@ -130,14 +137,34 @@ curl -X POST https://ocr.example.com/mcp/mcp \
   session manager（mounted 子应用的 lifespan 不随 FastAPI 自动执行）。
 - 存储迁移：`review_task` 新增 `author` 列（`_ensure_columns` 自动补列）。
 
-## 6. 配置
+## 6. 项目身份与单行保证（URL 一等身份）
+
+数字 project_id 只存在 GitLab 服务端、本地拿不到；且全局 `GITLAB_TOKEN` 可能对
+某些仓库无权限（连数字 ID 都解析不出）。因此 **URL 是一等的注册身份**，数字 ID
+只是"能解析到就用"的优选值。
+
+- `review_project` 行同时持有 id（主键）与 url（`project_url` + `url_key`
+  归一化匹配键，部分唯一索引）；存量行启动时自动回填 `url_key`。
+- **同一仓库无论数字 ID 还是 URL 先到，最终只有一行**：
+  - 数字行先建、URL 后到 → URL 补进该行，不插新行；
+  - URL 行先建（路径 ID `group%2Fproject`）、数字 ID 后到 → 该行**原地升级**
+    为主键数字 ID（标签绑定随迁），不删行；
+  - 仅"数字无 URL 行 + 路径行"历史裂行才走合并分支删掉多余行，自愈回一行。
+- **token 权限场景闭环**：控制台贴 URL 注册（解析失败也成功，得路径 ID 行）
+  → 绑专属 git token → `trigger_review(project_url=...)` → 命中该行用专属
+  token 拉代码/发评论。全局 token 无权限的仓库全程可用。
+- 任务里存的 ID 形态与注册行不一致时（如路径行升级成数字主键后，历史任务还带
+  旧路径 ID），token/通道解析按 `task.project_url` 归一化兜底找回同一行。
+- 控制台「添加项目」同样支持只贴 URL；重复贴同一 URL 幂等返回现有行。
+
+## 7. 配置
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `OCR_PUBLIC_BASE_URL` | 空 | 服务对外根地址；推送里拼接 `/console?task_id=` 报告链接，空则不带 |
 | `MCP_TOKEN` | 空 | 远程 MCP Bearer 令牌；空则不挂载 `/mcp` |
 
-## 7. 风险与边界
+## 8. 风险与边界
 
 - **行级评论定位错位**：parent..commit ≠ target..source diff → 行评 best-effort、
   失败静默；完整报告在汇总评论。

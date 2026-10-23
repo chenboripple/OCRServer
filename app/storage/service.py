@@ -30,22 +30,28 @@ class ReviewService:
 
     # ── 任务 ──────────────────────────────────────────────
     def create_task(self, *args, **kwargs) -> tuple[str, bool]:
-        result = self.task_repo.create(*args, **kwargs)
-        # 项目自动登记:首次见到某项目的任务时 upsert 进项目清单
-        # (重复提交命中去重也会走到这里,upsert 本身幂等)。
-        # 登记失败只记日志,绝不影响任务创建。
+        # 项目自动登记 + 身份收敛:upsert 幂等,返回生效行 ID(数字优先,
+        # URL 先建的路径行会在数字 ID 到达时原地升级)。任务尽量落在生效 ID 上,
+        # 减少同一仓库跨 ID 形态的重复评审。登记失败只记日志,绝不影响任务创建。
         project_id = kwargs.get("project_id")
         if len(args) >= 1:
             project_id = args[0]
-        if project_id:
+        effective_id = str(project_id) if project_id else ""
+        if effective_id:
             try:
                 project_url = kwargs.get("project_url", "")
                 if len(args) >= 6:
                     project_url = args[5]
-                self.project_repo.upsert(str(project_id), project_url or "")
+                returned = self.project_repo.upsert(effective_id, project_url or "")
+                if returned and returned != effective_id:
+                    effective_id = returned
+                    if len(args) >= 1:
+                        args = (effective_id,) + tuple(args[1:])
+                    else:
+                        kwargs = dict(kwargs, project_id=effective_id)
             except Exception as e:
                 log.warning(f"项目自动登记失败(project_id={project_id}): {e}")
-        return result
+        return self.task_repo.create(*args, **kwargs)
 
     def get_task(self, task_id: str) -> Optional[ReviewTask]:
         return self.task_repo.get(task_id)

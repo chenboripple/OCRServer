@@ -29,8 +29,9 @@ async def repost_worker():
             if unposted:
                 log.info(f"Found {len(unposted)} unposted tasks, attempting repost...")
                 for task in unposted:
-                    # 按项目解析客户端:绑定了 Git 令牌的项目用令牌回写,未绑定回退全局
-                    gl = get_project_gitlab(task.project_id)
+                    # 按项目解析客户端:绑定了 Git 令牌的项目用令牌回写,未绑定回退全局;
+                    # 任务 ID 形态与注册行不一致时按 task.project_url 兜底解析
+                    gl = get_project_gitlab(task.project_id, task.project_url)
                     if not gl:
                         # 客户端不可用是全局故障,不消耗任务的重试次数
                         log.warning("GitLab 客户端不可用,task=%s 暂不标记已回写", task.task_id)

@@ -4,6 +4,7 @@
 敏感字段(webhook_url / sign_secret / token)出参一律脱敏,只展示尾 4 位。
 """
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -11,7 +12,8 @@ from fastapi.responses import FileResponse
 from .. import config
 from .. import notifier
 from .. import storage
-from ..gitlab_client import GitLabClient, GitLabError
+from ..gitlab_client import GitLabClient, GitLabError, project_path_id
+from ..runtime import get_gitlab
 from ..schemas import (
     ChannelCreate,
     ChannelUpdate,
@@ -400,14 +402,34 @@ def create_project(body: ProjectCreate):
         raise _err("channel_not_found", status=404)
     if body.git_token_id and not storage.token_repo.get(body.git_token_id):
         raise _err("token_not_found", status=404)
-    # 幂等:重复添加只刷新 project_url;显式传了 channel_id/git_token_id 才覆盖绑定
-    existing = storage.project_repo.get(body.project_id)
-    storage.project_repo.upsert(body.project_id, body.project_url)
+    # 身份解析:数字 ID 直接用;URL-only 先按 URL 复用已注册行(幂等),
+    # 未注册则 best-effort 解析数字 ID,解析不出用 URL-编码路径 ID 一等注册
+    # (全局 token 无权限的仓库也照样登记,之后绑专属 git token 即可评审)。
+    pid = body.project_id or ""
+    if not pid:
+        existing_by_url = storage.project_repo.get_by_url(body.project_url)
+        if existing_by_url:
+            pid = existing_by_url.project_id
+        else:
+            gl = get_gitlab()
+            info = gl.get_project(body.project_url) if gl else None
+            if info and str(info.get("id") or "").isdigit():
+                pid = str(info["id"])
+            else:
+                pid = project_path_id(body.project_url)
+    if not pid:
+        raise _err("project_identity_unresolvable", status=400)
+    # 幂等:重复添加只刷新 project_url;显式传了 channel_id/git_token_id 才覆盖绑定。
+    # upsert 返回生效行 ID(URL 行被数字 ID 原地升级时可能与入参不同,以它为准)。
+    existing = storage.project_repo.get(pid)
+    effective = storage.project_repo.upsert(pid, body.project_url)
+    if effective:
+        pid = effective
     if body.channel_id is not None and (not existing or existing.channel_id != body.channel_id):
-        storage.project_repo.bind(body.project_id, body.channel_id)
+        storage.project_repo.bind(pid, body.channel_id)
     if body.git_token_id is not None and (not existing or existing.git_token_id != body.git_token_id):
-        storage.project_repo.bind_token(body.project_id, body.git_token_id)
-    return _project_row(body.project_id)
+        storage.project_repo.bind_token(pid, body.git_token_id)
+    return _project_row(pid)
 
 
 def _project_row(project_id: str) -> dict:
@@ -437,41 +459,51 @@ def _project_row(project_id: str) -> dict:
     }
 
 
-@router.put("/api/console/projects/{project_id}/token")
+def _route_project_id(project_id: str) -> str:
+    """绑定端点的项目寻址:路径 ID 行(git%2Fp 形态)经 URL 解码后 / 变成真实斜杠,
+    存储形态回不去;这里按 斜杠形态 → 再编码形态 回退解析出存储行 ID。
+
+    返回存储行 ID(数字或 URL-编码路径);查不到抛 404。
+    """
+    if storage.project_repo.get(project_id):
+        return project_id
+    if "/" in project_id:
+        encoded = quote(project_id, safe="")
+        if storage.project_repo.get(encoded):
+            return encoded
+    raise _err("project_not_found", status=404)
+
+
+@router.put("/api/console/projects/{project_id:path}/token")
 def bind_project_token(project_id: str, body: GitTokenBind):
-    project = storage.project_repo.get(project_id)
-    if not project:
-        raise _err("project_not_found", status=404)
+    pid = _route_project_id(project_id)
     if body.git_token_id and not storage.token_repo.get(body.git_token_id):
         raise _err("token_not_found", status=404)
     try:
-        storage.project_repo.bind_token(project_id, body.git_token_id)
+        storage.project_repo.bind_token(pid, body.git_token_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    return _project_row(project_id)
+    return _project_row(pid)
 
 
-@router.put("/api/console/projects/{project_id}/channel")
+@router.put("/api/console/projects/{project_id:path}/channel")
 def bind_project(project_id: str, body: ProjectBind):
-    project = storage.project_repo.get(project_id)
-    if not project:
-        raise _err("project_not_found", status=404)
+    pid = _route_project_id(project_id)
     if body.channel_id and not storage.channel_repo.get(body.channel_id):
         raise _err("channel_not_found", status=404)
     try:
-        storage.project_repo.bind(project_id, body.channel_id)
+        storage.project_repo.bind(pid, body.channel_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    return _project_row(project_id)
+    return _project_row(pid)
 
 
-@router.put("/api/console/projects/{project_id}/tags")
+@router.put("/api/console/projects/{project_id:path}/tags")
 def set_project_tags(project_id: str, body: ProjectTagsSet):
     """整体设置项目标签(全量替换);只能引用已维护的标签。"""
-    if not storage.project_repo.get(project_id):
-        raise _err("project_not_found", status=404)
+    pid = _route_project_id(project_id)
     try:
-        storage.tag_repo.set_project_tags(project_id, body.tag_ids)
+        storage.tag_repo.set_project_tags(pid, body.tag_ids)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    return _project_row(project_id)
+    return _project_row(pid)

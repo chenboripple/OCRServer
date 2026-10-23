@@ -11,12 +11,13 @@ from app.schemas import BranchReviewRequest
 class _FakeGL:
     """记录 clone/auth 并捕获 commit 评论的假 GitLab 客户端。"""
 
-    def __init__(self, comment_ok=True):
+    def __init__(self, comment_ok=True, clone_target=None):
         self.comment_ok = comment_ok
+        self.clone_target = clone_target  # 非 None:clone URL 重定向到本地裸仓库
         self.commit_calls = []  # [{sha, note, path, line, line_type}]
 
     def clone_url(self, project_url):
-        return project_url
+        return self.clone_target or project_url
 
     def git_auth_env(self):
         return {}
@@ -26,6 +27,18 @@ class _FakeGL:
             {"sha": sha, "note": note, "path": path, "line": line, "line_type": line_type}
         )
         return self.comment_ok
+
+
+class _FakeResolver:
+    """假全局 GitLab 客户端:只实现 get_project(URL → 数字 ID 解析)。"""
+
+    def __init__(self, info):
+        self.info = info
+        self.calls = []
+
+    def get_project(self, ident):
+        self.calls.append(ident)
+        return self.info
 
 
 def _finding(severity, path="a.py", line=10):
@@ -57,7 +70,7 @@ def branch_env(temp_storage, repo_cache, monkeypatch):
     fake_gl = _FakeGL()
     submitted = []
     monkeypatch.setattr(orchestrator, "repo_cache", rc)
-    monkeypatch.setattr(orchestrator, "get_project_gitlab", lambda project_id: fake_gl)
+    monkeypatch.setattr(orchestrator, "get_project_gitlab", lambda project_id, project_url="": fake_gl)
     monkeypatch.setattr(orchestrator, "submit_to_executor", submitted.append)
     return {"rc": rc, "remote": remote, "gl": fake_gl, "submitted": submitted}
 
@@ -66,6 +79,100 @@ def _req(**kw):
     kw.setdefault("source_branch", "feature")
     kw.setdefault("target_branch", "main")
     return BranchReviewRequest(project_id="1", **kw)
+
+
+@pytest.fixture
+def url_env(temp_storage, repo_cache, monkeypatch):
+    """URL 身份解析环境:注册行/请求用 URL 形态标识仓库(clone 重定向到本地裸仓库)。"""
+    rc, remote = repo_cache
+    url = "http://code.jms.com/g/p.git"
+    gl = _FakeGL(clone_target=remote)
+    submitted = []
+    monkeypatch.setattr(orchestrator, "repo_cache", rc)
+    monkeypatch.setattr(orchestrator, "get_project_gitlab", lambda project_id, project_url="": gl)
+    monkeypatch.setattr(orchestrator, "submit_to_executor", submitted.append)
+    return {"rc": rc, "remote": remote, "url": url, "gl": gl, "submitted": submitted}
+
+
+# ── URL 一等身份解析 ─────────────────────────────────
+
+def test_url_only_hits_registered_row(url_env):
+    """仅带 project_url(无数字 ID):按归一化 URL 复用已注册行。"""
+    storage.project_repo.upsert("77", url_env["url"])
+    resp = orchestrator.start_branch_review(
+        BranchReviewRequest(project_url=url_env["url"], source_branch="feature", target_branch="main")
+    )
+    assert resp.project_id == "77"
+    assert storage.get_task(resp.task_id).project_id == "77"
+    assert storage.project_repo.list(page=1, page_size=50)["total"] == 1  # 未插新行
+
+
+def test_url_only_ssh_form_matches_http_registered_row(url_env):
+    """ssh 形式 URL 与 http 注册行归一化后同键:同一行。"""
+    storage.project_repo.upsert("77", url_env["url"])
+    resp = orchestrator.start_branch_review(
+        BranchReviewRequest(
+            project_url="git@code.jms.com:g/p.git",
+            source_branch="feature", target_branch="main",
+        )
+    )
+    assert resp.project_id == "77"
+
+
+def test_url_only_new_repo_resolves_numeric_id(url_env, monkeypatch):
+    """未注册仓库:GitLab API best-effort 解析数字 ID 并注册。"""
+    resolver = _FakeResolver({"id": 77})
+    monkeypatch.setattr(orchestrator, "get_gitlab", lambda: resolver)
+    resp = orchestrator.start_branch_review(
+        BranchReviewRequest(project_url=url_env["url"], source_branch="feature", target_branch="main")
+    )
+    assert resp.project_id == "77"
+    project = storage.project_repo.get("77")
+    assert project is not None and project.url_key == "code.jms.com/g/p"
+
+
+def test_url_only_api_unresolvable_registers_path_id(url_env, monkeypatch):
+    """全局 token 无权限(解析失败):URL-编码路径 ID 一等注册,照样可触发、可绑令牌。"""
+    resolver = _FakeResolver(None)
+    monkeypatch.setattr(orchestrator, "get_gitlab", lambda: resolver)
+    resp = orchestrator.start_branch_review(
+        BranchReviewRequest(project_url=url_env["url"], source_branch="feature", target_branch="main")
+    )
+    assert resp.project_id == "g%2Fp"
+    assert resp.status == "queued"
+    task = storage.get_task(resp.task_id)
+    assert task.project_id == "g%2Fp"
+
+    # token 权限场景闭环:控制台给该行绑专属令牌后,任务仍能取到
+    tok = storage.token_repo.create(name="专属", token="glpat-dedicated")
+    storage.project_repo.bind_token("g%2Fp", tok.git_token_id)
+    assert storage.project_repo.resolve_git_token("g%2Fp", url_env["url"]) == "glpat-dedicated"
+
+
+def test_numeric_id_with_url_rekeys_path_row(url_env):
+    """URL 先注册成路径行,显式数字 ID + URL 再触发:行原地升级,任务落数字 ID。"""
+    storage.project_repo.upsert("g%2Fp", url_env["url"])
+    channel = storage.channel_repo.create(name="群", type="feishu", webhook_url="https://x/hook", sign_secret="")
+    storage.project_repo.bind("g%2Fp", channel.channel_id)
+
+    resp = orchestrator.start_branch_review(
+        BranchReviewRequest(
+            project_id="77", project_url=url_env["url"],
+            source_branch="feature", target_branch="main",
+        )
+    )
+    assert resp.project_id == "77"
+    assert storage.get_task(resp.task_id).project_id == "77"
+    project = storage.project_repo.get("77")
+    assert project.url_key == "code.jms.com/g/p"
+    assert project.channel_id == channel.channel_id  # 绑定随行升级保留
+
+
+def test_both_identity_missing_rejected_by_schema():
+    """project_id 与 project_url 都不给:pydantic root 校验拒绝。"""
+    import pydantic
+    with pytest.raises(pydantic.ValidationError):
+        BranchReviewRequest(source_branch="feature", target_branch="main")
 
 
 # ── 提交入口 ────────────────────────────────────────
@@ -96,7 +203,7 @@ def test_resubmit_same_head_dedupes(branch_env):
 
 
 def test_unregistered_project_without_url_rejected(temp_storage, monkeypatch):
-    monkeypatch.setattr(orchestrator, "get_project_gitlab", lambda project_id: None)
+    monkeypatch.setattr(orchestrator, "get_project_gitlab", lambda project_id, project_url="": None)
     with pytest.raises(orchestrator.BranchReviewError) as e:
         orchestrator.start_branch_review(
             BranchReviewRequest(project_id="9", source_branch="feature", target_branch="main")
@@ -139,7 +246,7 @@ def test_worker_branch_flow(temp_storage, repo_cache, blocking_severities, monke
     storage.project_repo.upsert("1", remote)
     gl = _FakeGL()
     monkeypatch.setattr(orchestrator, "repo_cache", rc)
-    monkeypatch.setattr(orchestrator, "get_project_gitlab", lambda project_id: gl)
+    monkeypatch.setattr(orchestrator, "get_project_gitlab", lambda project_id, project_url="": gl)
     # 不真投 executor:测试直接同步调 do_review_async
     monkeypatch.setattr(orchestrator, "submit_to_executor", lambda tid: None)
 
@@ -184,7 +291,7 @@ def test_worker_report_failure_leaves_repost(temp_storage, repo_cache, blocking_
     storage.project_repo.upsert("1", remote)
     gl = _FakeGL(comment_ok=False)
     monkeypatch.setattr(orchestrator, "repo_cache", rc)
-    monkeypatch.setattr(orchestrator, "get_project_gitlab", lambda project_id: gl)
+    monkeypatch.setattr(orchestrator, "get_project_gitlab", lambda project_id, project_url="": gl)
     monkeypatch.setattr(orchestrator, "submit_to_executor", lambda tid: None)
     resp = orchestrator.start_branch_review(_req())
 
@@ -253,7 +360,7 @@ def _run_worker_once(monkeypatch, gl, tid, branch_ok=True):
             return [storage.get_task(tid)]
         raise asyncio.CancelledError  # BaseException:穿透 except Exception,终止 worker
 
-    monkeypatch.setattr(repost, "get_project_gitlab", lambda project_id: gl)
+    monkeypatch.setattr(repost, "get_project_gitlab", lambda project_id, project_url="": gl)
     monkeypatch.setattr(repost, "asyncio", _StubAsyncio())
     captured = []
 

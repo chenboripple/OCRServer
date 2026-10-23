@@ -29,7 +29,7 @@ def test_trigger_review_returns_task(temp_storage, monkeypatch):
         return BranchReviewResponse(task_id="t1", status="queued", commit_sha="a" * 40)
 
     monkeypatch.setattr(mcp_server, "start_branch_review", fake_start)
-    out = mcp_server.trigger_review("1", "feature", "main", author="alice")
+    out = mcp_server.trigger_review("feature", "main", project_id="1", author="alice")
     assert out["ok"] is True and out["task_id"] == "t1"
     assert calls["req"].author == "alice"
 
@@ -39,7 +39,7 @@ def test_trigger_review_maps_branch_error(temp_storage, monkeypatch):
         raise BranchReviewError("branch_not_found", "nope", status=404)
 
     monkeypatch.setattr(mcp_server, "start_branch_review", fake_start)
-    out = mcp_server.trigger_review("1", "nope", "main")
+    out = mcp_server.trigger_review("nope", "main", project_id="1")
     assert out == {"ok": False, "code": "branch_not_found", "message": "nope"}
 
 
