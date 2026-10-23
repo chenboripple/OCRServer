@@ -1,0 +1,69 @@
+app/storage/connection.py
+  c728d200666fd5f8 6,21-46,259-267
+app/orchestrator.py
+  c728d200666fd5f8 11,14,80-86,89,106,152,254-259,262-265,267-285,294,303-304,318,345,401-403
+docs/功能文档/总览.md
+  c728d200666fd5f8 55-57
+app/static/console/i18n.js
+  c728d200666fd5f8 297,299,340,372-373,657,659,700,732-733
+app/routes/console.py
+  c728d200666fd5f8 7,15-16,405-427,429,431-432,462-477,479,483,486,489,491,495,498,501,504,506,509
+app/static/console/console.js
+  c728d200666fd5f8 613-614,621-622
+README.md
+  c728d200666fd5f8 98-99,105,110,114-115
+tests/test_console.py
+  c728d200666fd5f8 255-313
+tests/test_main_integration.py
+  c728d200666fd5f8 18,102
+tests/test_branch_review.py
+  c728d200666fd5f8 14,16,20,32-43,73,84-177,206,249,294,363
+app/storage/service.py
+  c728d200666fd5f8 33-35,39-40,45-51,54
+app/static/console/console.html
+  c728d200666fd5f8 760,765
+app/storage/repositories/project_repository.py
+  c728d200666fd5f8 3-10,15,26,35-42,44-45,47-83,86-87,89-130,133-159,167-195,288-293,304-315,345-349,360-371
+docs/功能文档/免MR分支评审与MCP.md
+  c728d200666fd5f8 33,41-44,48-53,56,63,66,80,140-160,167
+app/repost.py
+  c728d200666fd5f8 32-34
+app/runtime.py
+  c728d200666fd5f8 29,32-34,37,40
+app/schemas.py
+  c728d200666fd5f8 5-7,56-64,66,78-81,101-105,113-118,125,206-212,217-219,225-239
+tests/test_mcp_server.py
+  c728d200666fd5f8 32,42
+app/gitlab_client.py
+  c728d200666fd5f8 15,24-90,246-268
+app/storage/models.py
+  c728d200666fd5f8 35
+app/mcp_server.py
+  c728d200666fd5f8 59-61,69,74,91
+app/webhooks.py
+  c728d200666fd5f8 81
+tests/test_runtime.py
+  c728d200666fd5f8 28-45
+tests/test_storage.py
+  c728d200666fd5f8 414-574
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "5706e05e706df4c1ede9e2026d2ea2c8c3e2a615",
+  "prompts": {
+    "c728d200666fd5f8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d068c4c9-e91f-4c38-a5f7-64c62be74129",
+        "model": "claude-opus"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 942,
+      "total_deletions": 138,
+      "accepted_lines": 3480,
+      "overriden_lines": 0
+    }
+  }
+}
