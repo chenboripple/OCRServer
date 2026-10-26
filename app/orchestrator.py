@@ -309,6 +309,21 @@ def start_branch_review(req: BranchReviewRequest) -> BranchReviewResponse:
         clone_url = gl.clone_url(project_url)
         git_env = gl.git_auth_env()
 
+    # 路径 ID 行升级:注册时全局令牌看不到的仓库只能按路径登记;后来绑上能访问的
+    # 专属令牌(或全局令牌权限变化)后,借当前客户端解析数字 ID,行原地升级——
+    # 控制台展示与存量仓一致,任务与绑定随升级收敛到数字主键。解析不出保持
+    # 路径行,不影响评审(get_project 对 404/网络错误返回 None,不抛出)。
+    if gl and not pid.isdigit():
+        try:
+            info = gl.get_project(project_url)
+            if info and str(info.get("id") or "").isdigit():
+                upgraded = storage.project_repo.upsert(str(info["id"]), project_url)
+                if upgraded and upgraded != pid:
+                    log.info(f"项目行升级(路径 ID -> 数字 ID): {pid} -> {upgraded}")
+                    pid = upgraded
+        except Exception as e:
+            log.warning(f"数字项目 ID 解析失败(保持路径行, project_id={pid}): {e}")
+
     # 解析源分支 head(顺带 fetch 进 bare cache,worker 侧 prepare 增量秒级)
     try:
         repo_cache.fetch_branches(pid, clone_url, [req.source_branch], git_env=git_env)

@@ -22,6 +22,10 @@ class _FakeGL:
     def git_auth_env(self):
         return {}
 
+    def get_project(self, ident):
+        # 路径行升级探测的默认应答:解析不出(子类按需覆盖返回数字 ID)
+        return None
+
     def post_commit_comment(self, project_id, sha, note, path=None, line=None, line_type="new"):
         self.commit_calls.append(
             {"sha": sha, "note": note, "path": path, "line": line, "line_type": line_type}
@@ -190,6 +194,36 @@ def test_fetch_fail_with_bound_token_gives_no_bind_hint(url_env, monkeypatch):
         )
     assert e.value.code == "branch_not_found"
     assert "绑定专属" not in e.value.message
+
+
+def test_bound_token_upgrades_path_row_to_numeric(url_env, monkeypatch):
+    """路径 ID 行 + 可访问的专属令牌:解析数字 ID 后行原地升级,绑定保留不裂行。
+
+    全局令牌无权限的仓库注册时只能按路径登记;绑上专属令牌后再触发,
+    应借该令牌把行升级成数字主键——控制台展示与存量仓一致。
+    """
+    storage.project_repo.upsert("g%2Fp", url_env["url"])
+    tok = storage.token_repo.create(name="专属", token="glpat-x")
+    storage.project_repo.bind_token("g%2Fp", tok.git_token_id)
+
+    class _ResolvingGL(_FakeGL):
+        def get_project(self, ident):
+            return {"id": 11553}
+
+    monkeypatch.setattr(
+        orchestrator, "get_project_gitlab",
+        lambda project_id, project_url="": _ResolvingGL(clone_target=url_env["remote"]),
+    )
+    resp = orchestrator.start_branch_review(
+        BranchReviewRequest(project_url=url_env["url"], source_branch="feature", target_branch="main")
+    )
+    assert resp.project_id == "11553"
+    assert storage.get_task(resp.task_id).project_id == "11553"
+    project = storage.project_repo.get("11553")
+    assert project is not None
+    assert project.url_key == "code.jms.com/g/p"
+    assert project.git_token_id == tok.git_token_id   # 绑定随原地升级保留
+    assert storage.project_repo.get("g%2Fp") is None   # 行升级而非裂出第二行
 
 
 def test_numeric_id_with_url_rekeys_path_row(url_env):
