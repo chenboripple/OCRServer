@@ -1,0 +1,38 @@
+tests/test_branch_review.py
+  be1ea6ae6e95518a 152-194
+app/orchestrator.py
+  be1ea6ae6e95518a 294-304,317-325,328
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "336b9596309acdd4103ba7aa1bcf6593fb802923",
+  "prompts": {
+    "be1ea6ae6e95518a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6983e808-5ef0-4285-a55c-9f897f842740",
+        "model": "claude-opus"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 64,
+      "total_deletions": 1,
+      "accepted_lines": 64,
+      "overriden_lines": 0
+    },
+    "c728d200666fd5f8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d068c4c9-e91f-4c38-a5f7-64c62be74129",
+        "model": "claude-opus"
+      },
+      "human_author": "chenbo.chen1",
+      "messages": [],
+      "total_additions": 140,
+      "total_deletions": 0,
+      "accepted_lines": 140,
+      "overriden_lines": 0
+    }
+  }
+}
