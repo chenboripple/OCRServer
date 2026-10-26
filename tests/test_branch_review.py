@@ -149,6 +149,49 @@ def test_url_only_api_unresolvable_registers_path_id(url_env, monkeypatch):
     assert storage.project_repo.resolve_git_token("g%2Fp", url_env["url"]) == "glpat-dedicated"
 
 
+def test_clone_denied_still_registers_project(url_env, monkeypatch):
+    """全局令牌无拉取权限(clone/fetch 失败):项目仍先登记清单,报错指引绑令牌。
+
+    死路修复:注册若只发生在 create_task(fetch 成功之后),权限失败时永远落空,
+    控制台没有可绑专属令牌的行,调用方无从重试。
+    """
+    resolver = _FakeResolver(None)
+    monkeypatch.setattr(orchestrator, "get_gitlab", lambda: resolver)
+    # clone 指向不存在的仓库路径,模拟令牌无权限导致 clone 失败
+    gl = _FakeGL(clone_target=str(url_env["rc"].cache_dir / "no-access.git"))
+    monkeypatch.setattr(orchestrator, "get_project_gitlab", lambda project_id, project_url="": gl)
+
+    with pytest.raises(orchestrator.BranchReviewError) as e:
+        orchestrator.start_branch_review(
+            BranchReviewRequest(project_url=url_env["url"], source_branch="feature", target_branch="main")
+        )
+    assert e.value.code == "branch_not_found"
+    assert e.value.status == 404
+    assert "绑定专属 Git 令牌" in e.value.message
+
+    # 核心:失败路径上项目行也已在清单里(未绑定状态),控制台可绑、绑定后重试
+    project = storage.project_repo.get_by_url(url_env["url"])
+    assert project is not None
+    assert project.project_id == "g%2Fp"
+    assert project.git_token_id is None
+
+
+def test_fetch_fail_with_bound_token_gives_no_bind_hint(url_env, monkeypatch):
+    """已绑专属令牌仍 fetch 失败:多半是分支名错/令牌失效,报错不再误导去绑定。"""
+    storage.project_repo.upsert("77", url_env["url"])
+    tok = storage.token_repo.create(name="专属", token="glpat-x")
+    storage.project_repo.bind_token("77", tok.git_token_id)
+    gl = _FakeGL(clone_target=str(url_env["rc"].cache_dir / "no-access.git"))
+    monkeypatch.setattr(orchestrator, "get_project_gitlab", lambda project_id, project_url="": gl)
+
+    with pytest.raises(orchestrator.BranchReviewError) as e:
+        orchestrator.start_branch_review(
+            BranchReviewRequest(project_url=url_env["url"], source_branch="feature", target_branch="main")
+        )
+    assert e.value.code == "branch_not_found"
+    assert "绑定专属" not in e.value.message
+
+
 def test_numeric_id_with_url_rekeys_path_row(url_env):
     """URL 先注册成路径行,显式数字 ID + URL 再触发:行原地升级,任务落数字 ID。"""
     storage.project_repo.upsert("g%2Fp", url_env["url"])

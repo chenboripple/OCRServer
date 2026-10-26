@@ -291,6 +291,17 @@ def start_branch_review(req: BranchReviewRequest) -> BranchReviewResponse:
             status=400,
         )
 
+    # 身份已定即登记项目清单(幂等):全局令牌无该仓库拉取权限时 fetch 会失败,
+    # 任务建不出来,注册若只发生在 create_task 就永远落空——控制台没有可绑
+    # 专属令牌的行,调用方陷入死路。先落一行"未绑定"记录,绑定后重试即通。
+    # upsert 返回生效行 ID(路径行可能收敛/升级到既有数字行),后续一律以它为准。
+    try:
+        effective_pid = storage.project_repo.upsert(pid, project_url)
+        if effective_pid:
+            pid = effective_pid
+    except Exception as e:
+        log.warning(f"项目自动登记失败(project_id={pid}, 不影响本次评审): {e}")
+
     gl = get_project_gitlab(pid, project_url)
     clone_url = project_url
     git_env = None
@@ -303,9 +314,18 @@ def start_branch_review(req: BranchReviewRequest) -> BranchReviewResponse:
         repo_cache.fetch_branches(pid, clone_url, [req.source_branch], git_env=git_env)
         head_sha = repo_cache.get_ref_sha(pid, req.source_branch)
     except Exception as e:
+        # 项目尚未绑定专属令牌(刚才用的是全局令牌)时,失败很可能就是权限问题:
+        # 指引去控制台绑定——项目行已在上面登记,这条路走得通。已绑专属令牌
+        # 仍失败则多为分支名错误或令牌本身有问题,不再给绑定指引。
+        hint = ""
+        try:
+            if not storage.project_repo.resolve_git_token(pid, project_url):
+                hint = "（项目已登记至控制台；若因全局令牌无该仓库权限，绑定专属 Git 令牌后重试）"
+        except Exception:
+            pass
         raise BranchReviewError(
             "branch_not_found",
-            f"源分支 {req.source_branch} 不存在或无法访问: {e}",
+            f"源分支 {req.source_branch} 不存在或无法访问: {e}{hint}",
             status=404,
         ) from e
 
